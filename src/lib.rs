@@ -28,6 +28,12 @@ impl<T: Ser<S>, S: Serializer> SpecializedSer<S> for Option<T> {
     }
 }
 
+impl<S: Serializer> SpecializedSer<S> for &str {
+    fn specialized_serialize(&self, serializer: &mut S) {
+        serializer.serialize_str(self)
+    }
+}
+
 pub trait Serializer: Sized {
     type Sequence<'a>: SequenceSerializer<Serializer = Self>
     where
@@ -248,7 +254,7 @@ impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
                 },
                 TypeSer::Slice { elem: _ } => todo!(),
                 TypeSer::Reference { mutable: _, referent: _ } => todo!(),
-                TypeSer::Other => todo!(),
+                TypeSer::Other => todo!("{} other!", std::any::type_name::<T>()),
             }
         }
     }
@@ -303,7 +309,7 @@ fn serialize_primitive<T: 'static, S: Serializer>(
             }
         },
         TypeKind::Str(_str) => {
-            todo!()
+            todo!("xxx")
         }
         _ => unreachable!(),
     }
