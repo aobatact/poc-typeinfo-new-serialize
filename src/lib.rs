@@ -2,16 +2,16 @@
 #![feature(type_info)]
 use std::mem::type_info::Type;
 
-pub trait Ser {
-    fn serialize<S: Serializer + 'static>(&self, serializer: &mut S);
+pub trait Ser<S: Serializer> {
+    fn serialize(&self, serializer: &mut S);
 }
 
 pub trait SpecializedSer<S: Serializer> {
     fn specialized_serialize(&self, serializer: &mut S);
 }
 
-impl<T: Ser> SpecializedSer<JsonSerializer> for Option<T>{
-    fn specialized_serialize(&self, serializer: &mut JsonSerializer) {
+impl<T: Ser<S>, S: Serializer> SpecializedSer<S> for Option<T>{
+    fn specialized_serialize(&self, serializer: &mut S) {
         match self {
             Some(value) => serializer.serialize_some(value),
             None => serializer.serialize_none(),
@@ -19,7 +19,10 @@ impl<T: Ser> SpecializedSer<JsonSerializer> for Option<T>{
     }
 }
 
-pub trait Serializer {
+pub trait Serializer: Sized {
+    type Sequence<'a>: SequenceSerializer<Serializer = Self> where Self: 'a;
+    type Map<'a>: MapSerializer<Serializer = Self> where Self: 'a;
+
     fn serialize_str(&mut self, value: &str);
     fn serialize_i8(&mut self, value: i8);
     fn serialize_u8(&mut self, value: u8);
@@ -29,18 +32,33 @@ pub trait Serializer {
     fn serialize_u32(&mut self, value: u32);
     fn serialize_i64(&mut self, value: i64);
     fn serialize_u64(&mut self, value: u64);
+    fn serialize_i128(&mut self, value: i128);
+    fn serialize_u128(&mut self, value: u128);
     fn serialize_bool(&mut self, value: bool);
     fn serialize_f32(&mut self, value: f32);
     fn serialize_f64(&mut self, value: f64);
     fn serialize_unit(&mut self);
-    fn serialize_some<T: Ser>(&mut self, value: &T);
+    fn serialize_some<T: Ser<Self>>(&mut self, value: &T);
     fn serialize_none(&mut self);
-    fn serialize_seq<T: Ser, I: Iterator<Item = T>>(&mut self, values: I);
-    fn serialize_map<K: Ser, V: Ser, I: Iterator<Item = (K, V)>>(&mut self, entries: I);
+    fn serialize_seq(&mut self) -> Self::Sequence<'_>;
+    fn serialize_map(&mut self) -> Self::Map<'_>;
 }
 
-impl<T: 'static> Ser for T {
-    fn serialize<S: Serializer + 'static>(&self, serializer: &mut S) {
+pub trait SequenceSerializer {
+    type Serializer: Serializer;
+    fn serialize_element<T: Ser<Self::Serializer>>(&mut self, value: &T);
+    fn end(self);
+}
+
+pub trait MapSerializer {
+    type Serializer: Serializer;
+    fn serialize_key<K: Ser<Self::Serializer>>(&mut self, key: &K);
+    fn serialize_value<V: Ser<Self::Serializer>>(&mut self, value: &V);
+    fn end(self);
+}
+
+impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
+    fn serialize(&self, serializer: &mut S) {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
             specialized.specialized_serialize(serializer);
         } else {
@@ -81,6 +99,7 @@ impl<T: 'static> Ser for T {
                             16 => serializer.serialize_i16(*(self as *const T as *const i16)),
                             32 => serializer.serialize_i32(*(self as *const T as *const i32)),
                             64 => serializer.serialize_i64(*(self as *const T as *const i64)),
+                            128 => serializer.serialize_i128(*(self as *const T as *const i128)),
                             _ => unreachable!(),
                         }}
                     } else {
@@ -89,6 +108,7 @@ impl<T: 'static> Ser for T {
                             16 => serializer.serialize_u16(*(self as *const T as *const u16)),
                             32 => serializer.serialize_u32(*(self as *const T as *const u32)),
                             64 => serializer.serialize_u64(*(self as *const T as *const u64)),
+                            128 => serializer.serialize_u128(*(self as *const T as *const u128)),
                             _ => unreachable!(),
                         }}
                     }
@@ -117,6 +137,9 @@ pub struct JsonSerializer {
 }
 
 impl Serializer for JsonSerializer {
+    type Sequence<'b> = JsonSequenceSerializer<'b>;
+    type Map<'b> = JsonMapSerializer<'b>;
+
     fn serialize_str(&mut self, value: &str) {
         self.output.push('"');
         self.output.push_str(value);
@@ -155,6 +178,14 @@ impl Serializer for JsonSerializer {
         self.output.push_str(&value.to_string());
     }
 
+    fn serialize_i128(&mut self, value: i128) {
+        self.output.push_str(&value.to_string());
+    }
+
+    fn serialize_u128(&mut self, value: u128) {
+        self.output.push_str(&value.to_string());
+    }
+
     fn serialize_bool(&mut self, value: bool) {
         self.output.push_str(if value { "true" } else { "false" });
     }
@@ -171,7 +202,7 @@ impl Serializer for JsonSerializer {
         self.output.push_str("null");
     }
 
-    fn serialize_some<T: Ser>(&mut self, value: &T) {
+    fn serialize_some<T: Ser<Self>>(&mut self, value: &T) {
         value.serialize(self);
     }
 
@@ -179,32 +210,49 @@ impl Serializer for JsonSerializer {
         self.output.push_str("null");
     }
 
-    fn serialize_seq<T: Ser, I: Iterator<Item = T>>(&mut self, values: I) {
+    fn serialize_seq(&mut self) -> Self::Sequence<'_> {
         self.output.push('[');
-        let mut first = true;
-        for value in values {
-            if !first {
-                self.output.push(',');
-            }
-            first = false;
-            value.serialize(self);
-        }
-        self.output.push(']');
+        JsonSequenceSerializer { serializer: self }
     }
 
-    fn serialize_map<K: Ser, V: Ser, I: Iterator<Item = (K, V)>>(&mut self, entries: I) {
+    fn serialize_map(&mut self) -> Self::Map<'_> {
         self.output.push('{');
-        let mut first = true;
-        for (key, value) in entries {
-            if !first {
-                self.output.push(',');  
-            }
-            first = false;
-            key.serialize(self);
-            self.output.push(':');
-            value.serialize(self);
-        }
-        self.output.push('}');
+        JsonMapSerializer { serializer: self }
+    }
+}
+
+pub struct JsonSequenceSerializer<'a> {
+    serializer: &'a mut JsonSerializer,
+}
+
+impl SequenceSerializer for JsonSequenceSerializer<'_> {
+    type Serializer = JsonSerializer;
+
+    fn serialize_element<T: Ser<Self::Serializer>>(&mut self, value: &T) {
+        value.serialize(self.serializer);
+    }
+
+    fn end(self) {
+        self.serializer.output.push(']');
+    }
+}
+
+pub struct JsonMapSerializer<'a> {
+    serializer: &'a mut JsonSerializer,
+}
+
+impl MapSerializer for JsonMapSerializer<'_> {
+    type Serializer = JsonSerializer;
+
+    fn serialize_key<K: Ser<Self::Serializer>>(&mut self, key: &K) {
+        key.serialize(self.serializer);
+        self.serializer.output.push(':');
+    }
+    fn serialize_value<V: Ser<Self::Serializer>>(&mut self, value: &V) {
+        value.serialize(self.serializer);
+    }
+    fn end(self) {
+        self.serializer.output.push('}');
     }
 }
 
