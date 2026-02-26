@@ -181,19 +181,19 @@ impl<S: Serializer + 'static> TypeSer<S> {
                 };
                 TypeSer::Slice { elem }
             }
-            TypeKind::Reference(reference) => {
-                let ty = reference.pointee;
-                let referent = SerFieldInfo {
-                    name: "",
-                    offset: 0,
-                    vtable: get_reflect_vtable::<S>(ty),
-                    type_id: ty,
-                };
-                TypeSer::Reference {
-                    mutable: reference.mutable,
-                    referent,
-                }
-            }
+            // TypeKind::Reference(reference) => {
+            //     let ty = reference.pointee;
+            //     let referent = SerFieldInfo {
+            //         name: "",
+            //         offset: 0,
+            //         vtable: get_reflect_vtable::<S>(ty),
+            //         type_id: ty,
+            //     };
+            //     TypeSer::Reference {
+            //         mutable: reference.mutable,
+            //         referent,
+            //     }
+            // }
             TypeKind::Bool(_)
             | TypeKind::Char(_)
             | TypeKind::Int(_)
@@ -458,4 +458,16 @@ fn test_u32() {
     };
     std::hint::black_box((6_u32).serialize(&mut json));
     assert_eq!(json.output, "6");
+}
+
+#[test]
+fn test_struct() {
+    struct A {
+        first: u32
+    }
+    let mut json = JsonSerializer {
+        output: String::new(),
+    };
+    std::hint::black_box((A { first: 1 }).serialize(&mut json));
+    assert_eq!(json.output, "{\"first\":1}");
 }
