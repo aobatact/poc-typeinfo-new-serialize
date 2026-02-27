@@ -2,7 +2,7 @@
 macro_rules! specialized_ser_via_display_base {
     ($ty: ty, $trait: ident) => {
         impl<S: Serializer> $trait<S> for $ty {
-            fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+            fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
                 serializer.serialize_str(&self.to_string())
             }
         }
@@ -19,7 +19,7 @@ macro_rules! specialized_ser_via_display_inner {
 #[macro_export]
 macro_rules! specialized_ser_via_display {
     ($ty: ty) => {
-        $crate::specialized_ser_via_display_base!($ty, SpecializedSerialize);
+        $crate::specialized_ser_via_display_base!($ty, SpecializedSer);
     };
 }
 
@@ -27,7 +27,7 @@ macro_rules! specialized_ser_via_display {
 macro_rules! specialized_ser_via_deref_base {
     ($ty: ty, $trait: ident) => {
         impl<S: Serializer + 'static> $trait<S> for $ty where Self: Deref, <Self as Deref>::Target: Ser<S> {
-            fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+            fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
                 self.deref().serialize(serializer)
             }
         }
@@ -35,7 +35,7 @@ macro_rules! specialized_ser_via_deref_base {
 
     ($ty: ty, $trait: ident, $($generics: tt)+) => {
         impl<S: Serializer + 'static, $($generics)+> $trait<S> for $ty where Self: Deref, <Self as Deref>::Target: Ser<S> {
-            fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+            fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
                 self.deref().serialize(serializer)
             }
         }

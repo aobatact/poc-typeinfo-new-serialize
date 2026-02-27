@@ -14,68 +14,177 @@ pub(crate) mod macros;
 mod specialized_impls;
 
 pub trait Ser<S: Serializer> {
-    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error>;
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error>;
 }
 
 pub trait SpecializedSer<S: Serializer> {
-    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error>;
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error>;
 }
 
 pub(crate) trait SpecializedSerInner<S: Serializer> {
-    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error>;
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error>;
 }
 
 pub trait Serializer: Sized {
+    type Ok;
     type Error: SerializeError;
-    type Sequence<'a>: SequenceSerializer<Serializer = Self>
+    type SerializeSeq<'a>: SerializeSeq<Serializer = Self>
     where
         Self: 'a;
-    type Map<'a>: MapSerializer<Serializer = Self>
+    type SerializeTuple<'a>: SerializeTuple<Serializer = Self>
     where
         Self: 'a;
-    type Struct<'a>: StructSerializer<Serializer = Self>
+    type SerializeTupleStruct<'a>: SerializeTupleStruct<Serializer = Self>
+    where
+        Self: 'a;
+    type SerializeTupleVariant<'a>: SerializeTupleVariant<Serializer = Self>
+    where
+        Self: 'a;
+    type SerializeMap<'a>: SerializeMap<Serializer = Self>
+    where
+        Self: 'a;
+    type SerializeStruct<'a>: SerializeStruct<Serializer = Self>
+    where
+        Self: 'a;
+    type SerializeStructVariant<'a>: SerializeStructVariant<Serializer = Self>
     where
         Self: 'a;
 
-    fn serialize_str(&mut self, value: &str) -> Result<(), Self::Error>;
-    fn serialize_i8(&mut self, value: i8) -> Result<(), Self::Error>;
-    fn serialize_u8(&mut self, value: u8) -> Result<(), Self::Error>;
-    fn serialize_i16(&mut self, value: i16) -> Result<(), Self::Error>;
-    fn serialize_u16(&mut self, value: u16) -> Result<(), Self::Error>;
-    fn serialize_i32(&mut self, value: i32) -> Result<(), Self::Error>;
-    fn serialize_u32(&mut self, value: u32) -> Result<(), Self::Error>;
-    fn serialize_i64(&mut self, value: i64) -> Result<(), Self::Error>;
-    fn serialize_u64(&mut self, value: u64) -> Result<(), Self::Error>;
-    fn serialize_i128(&mut self, value: i128) -> Result<(), Self::Error>;
-    fn serialize_u128(&mut self, value: u128) -> Result<(), Self::Error>;
-    fn serialize_bool(&mut self, value: bool) -> Result<(), Self::Error>;
-    fn serialize_f32(&mut self, value: f32) -> Result<(), Self::Error>;
-    fn serialize_f64(&mut self, value: f64) -> Result<(), Self::Error>;
-    fn serialize_unit(&mut self) -> Result<(), Self::Error>;
-    fn serialize_some<T: Ser<Self>>(&mut self, value: &T) -> Result<(), Self::Error>;
-    fn serialize_none(&mut self) -> Result<(), Self::Error>;
-    fn serialize_seq(&mut self) -> Result<Self::Sequence<'_>, Self::Error>;
-    fn serialize_map(&mut self) -> Result<Self::Map<'_>, Self::Error>;
-    fn serialize_struct(&mut self) -> Result<Self::Struct<'_>, Self::Error>;
-
-    fn serialize_display<T: std::fmt::Display>(&mut self, value: T) -> Result<(), Self::Error> {
-        self.serialize_str(&value.to_string())
-    }
+    fn serialize_bool(&mut self, v: bool) -> Result<Self::Ok, Self::Error>;
+    fn serialize_i8(&mut self, v: i8) -> Result<Self::Ok, Self::Error>;
+    fn serialize_i16(&mut self, v: i16) -> Result<Self::Ok, Self::Error>;
+    fn serialize_i32(&mut self, v: i32) -> Result<Self::Ok, Self::Error>;
+    fn serialize_i64(&mut self, v: i64) -> Result<Self::Ok, Self::Error>;
+    fn serialize_i128(&mut self, v: i128) -> Result<Self::Ok, Self::Error>;
+    fn serialize_u8(&mut self, v: u8) -> Result<Self::Ok, Self::Error>;
+    fn serialize_u16(&mut self, v: u16) -> Result<Self::Ok, Self::Error>;
+    fn serialize_u32(&mut self, v: u32) -> Result<Self::Ok, Self::Error>;
+    fn serialize_u64(&mut self, v: u64) -> Result<Self::Ok, Self::Error>;
+    fn serialize_u128(&mut self, v: u128) -> Result<Self::Ok, Self::Error>;
+    fn serialize_f32(&mut self, v: f32) -> Result<Self::Ok, Self::Error>;
+    fn serialize_f64(&mut self, v: f64) -> Result<Self::Ok, Self::Error>;
+    fn serialize_char(&mut self, v: char) -> Result<Self::Ok, Self::Error>;
+    fn serialize_str(&mut self, v: &str) -> Result<Self::Ok, Self::Error>;
+    fn serialize_bytes(&mut self, v: &[u8]) -> Result<Self::Ok, Self::Error>;
+    fn serialize_none(&mut self) -> Result<Self::Ok, Self::Error>;
+    fn serialize_some<T: Ser<Self>>(&mut self, value: &T) -> Result<Self::Ok, Self::Error>;
+    fn serialize_unit(&mut self) -> Result<Self::Ok, Self::Error>;
+    fn serialize_unit_struct(&mut self, name: &'static str) -> Result<Self::Ok, Self::Error>;
+    fn serialize_unit_variant(
+        &mut self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+    ) -> Result<Self::Ok, Self::Error>;
+    fn serialize_newtype_struct<T: Ser<Self>>(
+        &mut self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error>;
+    fn serialize_newtype_variant<T: Ser<Self>>(
+        &mut self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        value: &T,
+    ) -> Result<Self::Ok, Self::Error>;
+    fn serialize_seq(
+        &mut self,
+        len: Option<usize>,
+    ) -> Result<Self::SerializeSeq<'_>, Self::Error>;
+    fn serialize_tuple(
+        &mut self,
+        len: usize,
+    ) -> Result<Self::SerializeTuple<'_>, Self::Error>;
+    fn serialize_tuple_struct(
+        &mut self,
+        name: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeTupleStruct<'_>, Self::Error>;
+    fn serialize_tuple_variant(
+        &mut self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeTupleVariant<'_>, Self::Error>;
+    fn serialize_map(
+        &mut self,
+        len: Option<usize>,
+    ) -> Result<Self::SerializeMap<'_>, Self::Error>;
+    fn serialize_struct(
+        &mut self,
+        name: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeStruct<'_>, Self::Error>;
+    fn serialize_struct_variant(
+        &mut self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        len: usize,
+    ) -> Result<Self::SerializeStructVariant<'_>, Self::Error>;
 }
 
-pub trait SerializeError {
-}
+pub trait SerializeError {}
 
-pub trait SequenceSerializer {
+pub trait SerializeSeq {
     type Serializer: Serializer;
     fn serialize_element<T: Ser<Self::Serializer> + ?Sized>(
         &mut self,
         value: &T,
     ) -> Result<(), <Self::Serializer as Serializer>::Error>;
-    fn end(self) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
 }
 
-pub trait MapSerializer {
+pub trait SerializeTuple {
+    type Serializer: Serializer;
+    fn serialize_element<T: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
+}
+
+pub trait SerializeTupleStruct {
+    type Serializer: Serializer;
+    fn serialize_field<T: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
+}
+
+pub trait SerializeTupleVariant {
+    type Serializer: Serializer;
+    fn serialize_field<T: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
+}
+
+pub trait SerializeMap {
     type Serializer: Serializer;
     fn serialize_key<K: Ser<Self::Serializer> + ?Sized>(
         &mut self,
@@ -85,24 +194,53 @@ pub trait MapSerializer {
         &mut self,
         value: &V,
     ) -> Result<(), <Self::Serializer as Serializer>::Error>;
-    fn end(self) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn serialize_entry<
+        K: Ser<Self::Serializer> + ?Sized,
+        V: Ser<Self::Serializer> + ?Sized,
+    >(
+        &mut self,
+        key: &K,
+        value: &V,
+    ) -> Result<(), <Self::Serializer as Serializer>::Error> {
+        self.serialize_key(key)?;
+        self.serialize_value(value)
+    }
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
 }
 
-pub trait StructSerializer {
+pub trait SerializeStruct {
     type Serializer: Serializer;
-    fn serialize_struct_name(
+    fn serialize_field<T: Ser<Self::Serializer> + ?Sized>(
         &mut self,
-        struct_name: &str,
-    ) -> Result<(), <Self::Serializer as Serializer>::Error>;
-    fn serialize_field_name(
-        &mut self,
-        field_name: &str,
-    ) -> Result<(), <Self::Serializer as Serializer>::Error>;
-    fn serialize_field_value<T: Ser<Self::Serializer>>(
-        &mut self,
+        key: &'static str,
         value: &T,
     ) -> Result<(), <Self::Serializer as Serializer>::Error>;
-    fn end(self) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
+}
+
+pub trait SerializeStructVariant {
+    type Serializer: Serializer;
+    fn serialize_field<T: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), <Self::Serializer as Serializer>::Error>;
+    fn end(
+        self,
+    ) -> Result<
+        <Self::Serializer as Serializer>::Ok,
+        <Self::Serializer as Serializer>::Error,
+    >;
 }
 
 type DynSer<S> = DynMetadata<dyn Ser<S>>;
@@ -269,7 +407,7 @@ impl<S: Serializer + 'static> TypeSer<S> {
 }
 
 impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S> for T {
-    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
             specialized.specialized_serialize(serializer)
         } else if let Some(specialized) =
@@ -282,31 +420,31 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                 TypeSer::Primitive(type_kind) => serialize_primitive(self, serializer, type_kind),
                 TypeSer::Struct { fields, len } => unsafe {
                     let fields = fields[..len].assume_init_ref();
-                    let mut serializer = serializer.serialize_map()?;
+                    let mut s =
+                        serializer.serialize_struct(std::any::type_name::<T>(), len)?;
                     for field in fields {
                         let field_value = field.to_dyn(self);
-                        serializer.serialize_key(&field.name)?;
-                        serializer.serialize_value(field_value)?;
+                        s.serialize_field(field.name, field_value)?;
                     }
-                    serializer.end()
+                    s.end()
                 },
                 TypeSer::Tuple { fields, len } => unsafe {
                     let fields = fields[..len].assume_init_ref();
-                    let mut serializer = serializer.serialize_seq()?;
+                    let mut tup = serializer.serialize_tuple(len)?;
                     for field in fields {
                         let field_value = field.to_dyn(self);
-                        serializer.serialize_element(field_value)?;
+                        tup.serialize_element(field_value)?;
                     }
-                    serializer.end()
+                    tup.end()
                 },
                 TypeSer::Array { len, elem } => unsafe {
-                    let mut serializer = serializer.serialize_seq()?;
+                    let mut seq = serializer.serialize_seq(Some(len))?;
                     for i in 0..len {
                         let field_ptr = (self as *const T as *const u8).add(i * elem.size);
                         let field_value = elem.to_dyn(&*field_ptr.cast::<()>());
-                        serializer.serialize_element(field_value)?;
+                        seq.serialize_element(field_value)?;
                     }
-                    serializer.end()
+                    seq.end()
                 },
                 // Slice is handled by the impl for [T] in specialized_impls.rs, so we can assume it's never returned by TypeSer::of
                 // When T try_as_dyn can be used for ?Sized types, we can remove this assumption and handle slices here as well.
@@ -327,7 +465,7 @@ fn serialize_primitive<T: 'static + ?Sized, S: Serializer>(
     this: &T,
     serializer: &mut S,
     type_kind: TypeKind,
-) -> Result<(), S::Error> {
+) -> Result<S::Ok, S::Error> {
     match type_kind {
         TypeKind::Bool(_bool) => unsafe {
             let b = *(this as *const T as *const bool);
@@ -335,9 +473,7 @@ fn serialize_primitive<T: 'static + ?Sized, S: Serializer>(
         },
         TypeKind::Char(_char) => unsafe {
             let c = *(this as *const T as *const char);
-            let mut buf = [0; 4];
-            let s = c.encode_utf8(&mut buf);
-            serializer.serialize_str(s)
+            serializer.serialize_char(c)
         },
         TypeKind::Int(int) => {
             if int.signed {
