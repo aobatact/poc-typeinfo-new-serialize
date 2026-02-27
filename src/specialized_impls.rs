@@ -1,7 +1,7 @@
 use super::*;
 use std::{ffi::OsStr, ops::Deref, path::Path};
 
-impl<T: 'static, S: Serializer + 'static> Ser<S> for [T] {
+impl<T: Ser<S>, S: Serializer + 'static> Ser<S> for [T] {
     fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for elem in self {
