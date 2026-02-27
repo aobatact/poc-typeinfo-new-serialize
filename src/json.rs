@@ -1,4 +1,5 @@
 use super::*;
+use std::fmt::Write;
 
 pub struct JsonSerializer {
     output: String,
@@ -22,64 +23,74 @@ impl JsonSerializer {
 impl Serializer for JsonSerializer {
     type Sequence<'a> = JsonSequenceSerializer<'a>;
     type Map<'a> = JsonMapSerializer<'a>;
-    type Struct<'a> = JsonMapSerializer<'a>;
+    type Struct<'a> = JsonStructSerializer<'a>;
 
     fn serialize_str(&mut self, value: &str) {
+        self.output.reserve(value.len());
         self.output.push('"');
-        self.output.push_str(value);
+        for c in value.chars() {
+            match c {
+                '\\' => self.output.push_str("\\\\"),
+                '"' => self.output.push_str("\\\""),
+                '\n' => self.output.push_str("\\n"),
+                '\r' => self.output.push_str("\\r"),
+                '\t' => self.output.push_str("\\t"),
+                _ => self.output.push(c),
+            }
+        }
         self.output.push('"');
     }
 
     fn serialize_i8(&mut self, value: i8) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_u8(&mut self, value: u8) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_i16(&mut self, value: i16) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_u16(&mut self, value: u16) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_i32(&mut self, value: i32) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_u32(&mut self, value: u32) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_i64(&mut self, value: i64) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_u64(&mut self, value: u64) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_i128(&mut self, value: i128) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_u128(&mut self, value: u128) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_bool(&mut self, value: bool) {
-        self.output.push_str(if value { "true" } else { "false" });
+        write!(&mut self.output, "{}", if value { "true" } else { "false" }).unwrap();
     }
 
     fn serialize_f32(&mut self, value: f32) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_f64(&mut self, value: f64) {
-        self.output.push_str(&value.to_string());
+        write!(&mut self.output, "{}", value).unwrap();
     }
 
     fn serialize_unit(&mut self) {
@@ -111,7 +122,11 @@ impl Serializer for JsonSerializer {
     }
 
     fn serialize_struct(&mut self) -> Self::Struct<'_> {
-        self.serialize_map()
+        self.output.push('{');
+        JsonStructSerializer {
+            serializer: self,
+            first: true,
+        }
     }
 }
 
@@ -162,7 +177,12 @@ impl MapSerializer for JsonMapSerializer<'_> {
     }
 }
 
-impl StructSerializer for JsonMapSerializer<'_> {
+pub struct JsonStructSerializer<'a> {
+    serializer: &'a mut JsonSerializer,
+    first: bool,
+}
+
+impl StructSerializer for JsonStructSerializer<'_> {
     type Serializer = JsonSerializer;
 
     fn serialize_struct_name(&mut self, _struct_name: &str) {
