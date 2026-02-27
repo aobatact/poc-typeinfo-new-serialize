@@ -264,6 +264,16 @@ impl<S: Serializer + 'static> TypeSer<S> {
     }
 }
 
+impl<T: 'static, S: Serializer + 'static> Ser<S> for [T] {
+    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+        let mut seq = serializer.serialize_seq()?;
+        for elem in self {
+            seq.serialize_element(elem)?;
+        }
+        seq.end()
+    }
+}
+
 impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S> for T {
     fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
@@ -304,7 +314,9 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                     }
                     serializer.end()
                 },
-                TypeSer::Slice { elem: _ } => todo!(),
+                // Slice is handled by the impl for [T] above, so we can assume it's never returned by TypeSer::of
+                // When T try_as_dyn can be used for ?Sized types, we can remove this assumption and handle slices here as well.
+                TypeSer::Slice { elem: _ } => unreachable!(),
                 TypeSer::Reference {
                     mutable: _,
                     referent: _,
