@@ -324,4 +324,29 @@ mod tests {
         ([0, 1, 2]).serialize(&mut json).unwrap();
         assert_eq!(json.as_str(), "[0,1,2]");
     }
+
+    #[test]
+    fn test_slice() {
+        let mut json = JsonSerializer::new_vec();
+        let v = [1, 2, 3];
+        let s: &[i32] = &v;
+        s.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "[1,2,3]");
+    }
+
+    #[test]
+    fn test_vec() {
+        let mut json = JsonSerializer::new_vec();
+        let v = vec![10, 20, 30];
+        v.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "[10,20,30]");
+    }
+
+    #[test]
+    fn test_vec_empty() {
+        let mut json = JsonSerializer::new_vec();
+        let v: Vec<u32> = vec![];
+        v.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "[]");
+    }
 }

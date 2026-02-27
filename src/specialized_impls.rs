@@ -20,6 +20,12 @@ impl<S: Serializer> SpecializedSerInner<S> for String {
     }
 }
 
+impl<T: 'static, S: Serializer + 'static> SpecializedSerInner<S> for Vec<T> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+        self.as_slice().serialize(serializer)
+    }
+}
+
 specialized_ser_via_display_inner!(std::net::IpAddr, SpecializedSerInner);
 specialized_ser_via_display_inner!(std::net::Ipv4Addr, SpecializedSerInner);
 specialized_ser_via_display_inner!(std::net::Ipv6Addr, SpecializedSerInner);
