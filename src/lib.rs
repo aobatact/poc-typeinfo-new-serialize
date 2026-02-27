@@ -63,9 +63,9 @@ pub trait Serializer: Sized {
     fn serialize_unit(&mut self) -> Result<(), Self::Error>;
     fn serialize_some<T: Ser<Self>>(&mut self, value: &T) -> Result<(), Self::Error>;
     fn serialize_none(&mut self) -> Result<(), Self::Error>;
-    fn serialize_seq(&mut self) -> Self::Sequence<'_>;
-    fn serialize_map(&mut self) -> Self::Map<'_>;
-    fn serialize_struct(&mut self) -> Self::Struct<'_>;
+    fn serialize_seq(&mut self) -> Result<Self::Sequence<'_>, Self::Error>;
+    fn serialize_map(&mut self) -> Result<Self::Map<'_>, Self::Error>;
+    fn serialize_struct(&mut self) -> Result<Self::Struct<'_>, Self::Error>;
 }
 
 pub trait SequenceSerializer {
@@ -279,7 +279,7 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                 TypeSer::Primitive(type_kind) => serialize_primitive(self, serializer, type_kind),
                 TypeSer::Struct { fields, len } => unsafe {
                     let fields = fields[..len].assume_init_ref();
-                    let mut serializer = serializer.serialize_map();
+                    let mut serializer = serializer.serialize_map()?;
                     for field in fields {
                         let field_value = field.to_dyn(self);
                         serializer.serialize_key(&field.name)?;
@@ -289,7 +289,7 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                 },
                 TypeSer::Tuple { fields, len } => unsafe {
                     let fields = fields[..len].assume_init_ref();
-                    let mut serializer = serializer.serialize_seq();
+                    let mut serializer = serializer.serialize_seq()?;
                     for field in fields {
                         let field_value = field.to_dyn(self);
                         serializer.serialize_element(field_value)?;
@@ -297,7 +297,7 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                     serializer.end()
                 },
                 TypeSer::Array { len, elem } => unsafe {
-                    let mut serializer = serializer.serialize_seq();
+                    let mut serializer = serializer.serialize_seq()?;
                     for i in 0..len {
                         let field_ptr = (self as *const T as *const u8).add(i * elem.size);
                         let field_value = elem.to_dyn(&*field_ptr.cast::<()>());
