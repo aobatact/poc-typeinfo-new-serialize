@@ -236,10 +236,7 @@ impl<W: Write> Serializer for JsonSerializer<W> {
         })
     }
 
-    fn serialize_tuple(
-        &mut self,
-        _len: usize,
-    ) -> Result<Self::SerializeTuple<'_>, Self::Error> {
+    fn serialize_tuple(&mut self, _len: usize) -> Result<Self::SerializeTuple<'_>, Self::Error> {
         self.writer.write_all(b"[")?;
         Ok(JsonSerializeTuple {
             serializer: self,
@@ -614,5 +611,43 @@ mod tests {
         let ref_int = &&42;
         ref_int.serialize(&mut json).unwrap();
         assert_eq!(json.as_str(), "42");
+    }
+
+    #[test]
+    fn test_box() {
+        let mut json = JsonSerializer::new_vec();
+        let boxed_int = Box::new(42);
+        boxed_int.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "42");
+    }
+
+    #[test]
+    fn test_option() {
+        let mut json = JsonSerializer::new_vec();
+        let opt_int = Some(42);
+        opt_int.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "42");
+
+        let opt_none: Option<u32> = None;
+        let mut json_none = JsonSerializer::new_vec();
+        opt_none.serialize(&mut json_none).unwrap();
+        assert_eq!(json_none.as_str(), "null");
+    }
+
+    #[test]
+    fn test_hashmap() {
+        use std::collections::HashMap;
+        let mut json = JsonSerializer::new_vec();
+        let mut map = HashMap::new();
+        map.insert("a", 1);
+        map.insert("b", 2);
+        map.serialize(&mut json).unwrap();
+        // Note: HashMap does not guarantee order, so we check both possibilities.
+        let s = json.as_str();
+        assert!(
+            s == "{\"a\":1,\"b\":2}" || s == "{\"b\":2,\"a\":1}",
+            "Unexpected JSON output: {}",
+            s
+        );
     }
 }
