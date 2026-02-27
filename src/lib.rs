@@ -120,11 +120,10 @@ enum TypeSer<S: 'static> {
         len: usize,
         elem: SerTypeInfo<S>,
     },
-    Slice {
-        elem: SerTypeInfo<S>,
-    },
+    // Slice {
+    //     elem: SerTypeInfo<S>,
+    // },
     Reference {
-        mutable: bool,
         referent: SerTypeInfo<S>,
     },
     Other,
@@ -137,6 +136,7 @@ struct SerFieldInfo<S: 'static> {
 }
 
 struct SerTypeInfo<S: 'static> {
+    #[allow(unused)]
     name: &'static str,
     size: usize,
     vtable: DynSer<S>,
@@ -227,29 +227,30 @@ impl<S: Serializer + 'static> TypeSer<S> {
                     elem,
                 }
             }
-            TypeKind::Slice(slice) => {
-                let ty = slice.element_ty;
-                let type_info = ty.info();
-                let elem = SerTypeInfo {
+            // TypeKind::Slice(slice) => {
+            //     let ty = slice.element_ty;
+            //     let type_info = ty.info();
+            //     let elem = SerTypeInfo {
+            //         name: "", // todo: get type name
+            //         size: type_info.size.unwrap(),
+            //         vtable: get_reflect_vtable::<S>(ty),
+            //     };
+            //     TypeSer::Slice { elem }
+            // }
+            TypeKind::Reference(reference) => {
+                let Some(size) = reference.pointee.info().size else {
+                    // Unsized types behind references are not supported here, since `try_as_dyn` currently only works for sized types.
+                    // When `try_as_dyn` is extended to support `?Sized` types, we can remove this check and handle unsized types behind references as well.
+                    return TypeSer::Other;
+                };
+                let ty = reference.pointee;
+                let referent = SerTypeInfo {
                     name: "", // todo: get type name
-                    size: type_info.size.unwrap(),
+                    size,
                     vtable: get_reflect_vtable::<S>(ty),
                 };
-                TypeSer::Slice { elem }
+                TypeSer::Reference { referent }
             }
-            // TypeKind::Reference(reference) => {
-            //     let ty = reference.pointee;
-            //     let referent = SerFieldInfo {
-            //         name: "",
-            //         offset: 0,
-            //         vtable: get_reflect_vtable::<S>(ty),
-            //         type_id: ty,
-            //     };
-            //     TypeSer::Reference {
-            //         mutable: reference.mutable,
-            //         referent,
-            //     }
-            // }
             TypeKind::Bool(_)
             | TypeKind::Char(_)
             | TypeKind::Int(_)
@@ -316,11 +317,12 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                 },
                 // Slice is handled by the impl for [T] above, so we can assume it's never returned by TypeSer::of
                 // When T try_as_dyn can be used for ?Sized types, we can remove this assumption and handle slices here as well.
-                TypeSer::Slice { elem: _ } => unreachable!(),
-                TypeSer::Reference {
-                    mutable: _,
-                    referent: _,
-                } => todo!(),
+                // TypeSer::Slice { elem: _ } => unreachable!(),
+                TypeSer::Reference { referent } => unsafe {
+                    let pointee_ptr = *(self as *const T as *const *const u8);
+                    let pointee = referent.to_dyn(&*pointee_ptr.cast::<()>());
+                    pointee.serialize(serializer)
+                },
                 TypeSer::Other => todo!("{} other!", std::any::type_name::<T>()),
             }
         }

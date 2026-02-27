@@ -297,6 +297,7 @@ mod tests {
     #[test]
     fn test_struct() {
         struct A {
+            #[allow(unused)]
             first: u32,
         }
         let mut json = JsonSerializer::new_vec();
@@ -348,5 +349,13 @@ mod tests {
         let v: Vec<u32> = vec![];
         v.serialize(&mut json).unwrap();
         assert_eq!(json.as_str(), "[]");
+    }
+
+    #[test]
+    fn test_ref() {
+        let mut json = JsonSerializer::new_vec();
+        let ref_int = &&42;
+        ref_int.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "42");
     }
 }
