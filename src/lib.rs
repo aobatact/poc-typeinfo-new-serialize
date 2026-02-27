@@ -251,7 +251,7 @@ struct SerTypeInfo<S: 'static> {
 }
 
 impl<S: 'static> SerFieldInfo<S> {
-    unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
+    const unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
         unsafe {
             let field_ptr = (ptr as *const T as *const u8).add(self.offset);
             let fat_ptr =
@@ -262,7 +262,7 @@ impl<S: 'static> SerFieldInfo<S> {
 }
 
 impl<S: 'static> SerTypeInfo<S> {
-    unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
+    const unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
         let field_ptr = ptr as *const T as *const u8;
         unsafe {
             let fat_ptr =
