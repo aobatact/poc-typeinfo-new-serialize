@@ -9,13 +9,15 @@ impl<W: Write> JsonSerializer<W> {
     pub fn new(writer: W) -> Self {
         Self { writer }
     }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
 }
 
 impl JsonSerializer<Vec<u8>> {
     pub fn new_vec() -> Self {
-        Self {
-            writer: Vec::new(),
-        }
+        Self { writer: Vec::new() }
     }
 
     pub fn into_vec(self) -> Vec<u8> {
@@ -28,6 +30,10 @@ impl JsonSerializer<Vec<u8>> {
 
     pub fn as_str(&self) -> &str {
         std::str::from_utf8(&self.writer).unwrap()
+    }
+
+    pub fn into_string(self) -> String {
+        String::from_utf8(self.writer).unwrap()
     }
 }
 
@@ -44,9 +50,18 @@ impl From<std::io::Error> for JsonSerializeError {
 
 impl<W: Write> Serializer for JsonSerializer<W> {
     type Error = JsonSerializeError;
-    type Sequence<'a> = JsonSequenceSerializer<'a, W> where W: 'a;
-    type Map<'a> = JsonMapSerializer<'a, W> where W: 'a;
-    type Struct<'a> = JsonStructSerializer<'a, W> where W: 'a;
+    type Sequence<'a>
+        = JsonSequenceSerializer<'a, W>
+    where
+        W: 'a;
+    type Map<'a>
+        = JsonMapSerializer<'a, W>
+    where
+        W: 'a;
+    type Struct<'a>
+        = JsonStructSerializer<'a, W>
+    where
+        W: 'a;
 
     fn serialize_str(&mut self, value: &str) -> Result<(), Self::Error> {
         self.writer.write_all(b"\"")?;
@@ -266,6 +281,20 @@ mod tests {
     }
 
     #[test]
+    fn test_f32() {
+        let mut json = JsonSerializer::new_vec();
+        (6.5_f32).serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "6.5");
+    }
+
+    #[test]
+    fn test_char() {
+        let mut json = JsonSerializer::new_vec();
+        ('a').serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "\"a\"");
+    }
+
+    #[test]
     fn test_struct() {
         struct A {
             first: u32,
@@ -280,6 +309,13 @@ mod tests {
         let mut json = JsonSerializer::new_vec();
         ("aaa").serialize(&mut json).unwrap();
         assert_eq!(json.as_str(), "\"aaa\"");
+    }
+
+    #[test]
+    fn test_str_escape() {
+        let mut json = JsonSerializer::new_vec();
+        ("aa\"a").serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "\"aa\\\"a\"");
     }
 
     #[test]

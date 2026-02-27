@@ -10,6 +10,8 @@ use std::{
 };
 
 pub mod json;
+pub(crate) mod macros;
+mod specialized_impls;
 
 pub trait Ser<S: Serializer> {
     fn serialize(&self, serializer: &mut S) -> Result<(), S::Error>;
@@ -19,19 +21,8 @@ pub trait SpecializedSer<S: Serializer> {
     fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error>;
 }
 
-impl<T: Ser<S>, S: Serializer> SpecializedSer<S> for Option<T> {
-    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
-        match self {
-            Some(value) => serializer.serialize_some(value),
-            None => serializer.serialize_none(),
-        }
-    }
-}
-
-impl<S: Serializer> SpecializedSer<S> for &str {
-    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
-        serializer.serialize_str(self)
-    }
+pub(crate) trait SpecializedSerInner<S: Serializer> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error>;
 }
 
 pub trait Serializer: Sized {
@@ -66,6 +57,10 @@ pub trait Serializer: Sized {
     fn serialize_seq(&mut self) -> Result<Self::Sequence<'_>, Self::Error>;
     fn serialize_map(&mut self) -> Result<Self::Map<'_>, Self::Error>;
     fn serialize_struct(&mut self) -> Result<Self::Struct<'_>, Self::Error>;
+
+    fn serialize_display<T: std::fmt::Display>(&mut self, value: T) -> Result<(), Self::Error> {
+        self.serialize_str(&value.to_string())
+    }
 }
 
 pub trait SequenceSerializer {
@@ -273,6 +268,10 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
     fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
             specialized.specialized_serialize(serializer)
+        } else if let Some(specialized) =
+            std::any::try_as_dyn::<_, dyn SpecializedSerInner<S>>(self)
+        {
+            specialized.specialized_serialize(serializer)
         } else {
             let type_ser = const { TypeSer::<S>::of::<T>() };
             match type_ser {
@@ -316,6 +315,7 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
     }
 }
 
+#[inline]
 fn serialize_primitive<T: 'static + ?Sized, S: Serializer>(
     this: &T,
     serializer: &mut S,
@@ -365,7 +365,7 @@ fn serialize_primitive<T: 'static + ?Sized, S: Serializer>(
             }
         },
         TypeKind::Str(_str) => {
-            todo!("xxx")
+            unreachable!() // str should be handled by SpecializedSerInner
         }
         _ => unreachable!(),
     }
