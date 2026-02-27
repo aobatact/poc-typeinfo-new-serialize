@@ -20,12 +20,24 @@ impl JsonSerializer {
     }
 }
 
+pub enum JsonSerializeError {
+    Fmt(std::fmt::Error),
+    Io(std::io::Error),
+}
+
+impl From<std::fmt::Error> for JsonSerializeError {
+    fn from(err: std::fmt::Error) -> Self {
+        JsonSerializeError::Fmt(err)
+    }
+}
+
 impl Serializer for JsonSerializer {
+    type Error = JsonSerializeError;
     type Sequence<'a> = JsonSequenceSerializer<'a>;
     type Map<'a> = JsonMapSerializer<'a>;
     type Struct<'a> = JsonStructSerializer<'a>;
 
-    fn serialize_str(&mut self, value: &str) {
+    fn serialize_str(&mut self, value: &str) -> Result<(), Self::Error> {
         self.output.reserve(value.len());
         self.output.push('"');
         for c in value.chars() {
@@ -39,70 +51,73 @@ impl Serializer for JsonSerializer {
             }
         }
         self.output.push('"');
+        Ok(())
     }
 
-    fn serialize_i8(&mut self, value: i8) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_i8(&mut self, value: i8) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_u8(&mut self, value: u8) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_u8(&mut self, value: u8) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_i16(&mut self, value: i16) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_i16(&mut self, value: i16) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_u16(&mut self, value: u16) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_u16(&mut self, value: u16) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_i32(&mut self, value: i32) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_i32(&mut self, value: i32) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_u32(&mut self, value: u32) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_u32(&mut self, value: u32) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_i64(&mut self, value: i64) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_i64(&mut self, value: i64) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_u64(&mut self, value: u64) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_u64(&mut self, value: u64) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_i128(&mut self, value: i128) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_i128(&mut self, value: i128) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_u128(&mut self, value: u128) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_u128(&mut self, value: u128) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_bool(&mut self, value: bool) {
-        write!(&mut self.output, "{}", if value { "true" } else { "false" }).unwrap();
+    fn serialize_bool(&mut self, value: bool) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", if value { "true" } else { "false" }).map_err(Into::into)
     }
 
-    fn serialize_f32(&mut self, value: f32) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_f32(&mut self, value: f32) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_f64(&mut self, value: f64) {
-        write!(&mut self.output, "{}", value).unwrap();
+    fn serialize_f64(&mut self, value: f64) -> Result<(), Self::Error> {
+        write!(&mut self.output, "{}", value).map_err(Into::into)
     }
 
-    fn serialize_unit(&mut self) {
+    fn serialize_unit(&mut self) -> Result<(), Self::Error> {
         self.output.push_str("null");
+        Ok(())
     }
 
-    fn serialize_some<T: Ser<Self>>(&mut self, value: &T) {
-        value.serialize(self);
+    fn serialize_some<T: Ser<Self>>(&mut self, value: &T) -> Result<(), Self::Error> {
+        value.serialize(self)
     }
 
-    fn serialize_none(&mut self) {
+    fn serialize_none(&mut self) -> Result<(), Self::Error> {
         self.output.push_str("null");
+        Ok(())
     }
 
     fn serialize_seq(&mut self) -> Self::Sequence<'_> {
@@ -138,17 +153,21 @@ pub struct JsonSequenceSerializer<'a> {
 impl SequenceSerializer for JsonSequenceSerializer<'_> {
     type Serializer = JsonSerializer;
 
-    fn serialize_element<T: Ser<Self::Serializer> + ?Sized>(&mut self, value: &T) {
+    fn serialize_element<T: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), JsonSerializeError> {
         if self.first {
             self.first = false;
         } else {
             self.serializer.output.push(',');
         }
-        value.serialize(self.serializer);
+        value.serialize(self.serializer)
     }
 
-    fn end(self) {
+    fn end(self) -> Result<(), JsonSerializeError> {
         self.serializer.output.push(']');
+        Ok(())
     }
 }
 
@@ -160,20 +179,28 @@ pub struct JsonMapSerializer<'a> {
 impl MapSerializer for JsonMapSerializer<'_> {
     type Serializer = JsonSerializer;
 
-    fn serialize_key<K: Ser<Self::Serializer> + ?Sized>(&mut self, key: &K) {
+    fn serialize_key<K: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        key: &K,
+    ) -> Result<(), JsonSerializeError> {
         if self.first {
             self.first = false;
         } else {
             self.serializer.output.push(',');
         }
-        key.serialize(self.serializer);
+        key.serialize(self.serializer)?;
         self.serializer.output.push(':');
+        Ok(())
     }
-    fn serialize_value<V: Ser<Self::Serializer> + ?Sized>(&mut self, value: &V) {
-        value.serialize(self.serializer);
+    fn serialize_value<V: Ser<Self::Serializer> + ?Sized>(
+        &mut self,
+        value: &V,
+    ) -> Result<(), JsonSerializeError> {
+        value.serialize(self.serializer)
     }
-    fn end(self) {
+    fn end(self) -> Result<(), JsonSerializeError> {
         self.serializer.output.push('}');
+        Ok(())
     }
 }
 
@@ -185,26 +212,32 @@ pub struct JsonStructSerializer<'a> {
 impl StructSerializer for JsonStructSerializer<'_> {
     type Serializer = JsonSerializer;
 
-    fn serialize_struct_name(&mut self, _struct_name: &str) {
+    fn serialize_struct_name(&mut self, _struct_name: &str) -> Result<(), JsonSerializeError> {
         // JSON doesn't have a concept of struct name, so we can ignore it.
+        Ok(())
     }
 
-    fn serialize_field_name(&mut self, field_name: &str) {
+    fn serialize_field_name(&mut self, field_name: &str) -> Result<(), JsonSerializeError> {
         if self.first {
             self.first = false;
         } else {
             self.serializer.output.push(',');
         }
-        self.serializer.serialize_str(field_name);
+        self.serializer.serialize_str(field_name)?;
         self.serializer.output.push(':');
+        Ok(())
     }
 
-    fn serialize_field_value<T: Ser<Self::Serializer>>(&mut self, value: &T) {
-        value.serialize(self.serializer);
+    fn serialize_field_value<T: Ser<Self::Serializer>>(
+        &mut self,
+        value: &T,
+    ) -> Result<(), JsonSerializeError> {
+        value.serialize(self.serializer)
     }
 
-    fn end(self) {
+    fn end(self) -> Result<(), JsonSerializeError> {
         self.serializer.output.push('}');
+        Ok(())
     }
 }
 
