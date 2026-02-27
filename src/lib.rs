@@ -2,14 +2,14 @@
 #![feature(type_info)]
 #![feature(ptr_metadata)]
 
+use core::str;
 use std::{
     any::TypeId,
-    mem::{
-        MaybeUninit,
-        type_info::{TypeKind},
-    },
+    mem::{MaybeUninit, type_info::TypeKind},
     ptr::DynMetadata,
 };
+
+pub mod json;
 
 pub trait Ser<S: Serializer> {
     fn serialize(&self, serializer: &mut S);
@@ -41,6 +41,9 @@ pub trait Serializer: Sized {
     type Map<'a>: MapSerializer<Serializer = Self>
     where
         Self: 'a;
+    type Struct<'a>: StructSerializer<Serializer = Self>
+    where
+        Self: 'a;
 
     fn serialize_str(&mut self, value: &str);
     fn serialize_i8(&mut self, value: i8);
@@ -61,6 +64,7 @@ pub trait Serializer: Sized {
     fn serialize_none(&mut self);
     fn serialize_seq(&mut self) -> Self::Sequence<'_>;
     fn serialize_map(&mut self) -> Self::Map<'_>;
+    fn serialize_struct(&mut self) -> Self::Struct<'_>;
 }
 
 pub trait SequenceSerializer {
@@ -76,24 +80,38 @@ pub trait MapSerializer {
     fn end(self);
 }
 
+pub trait StructSerializer {
+    type Serializer: Serializer;
+    fn serialize_struct_name(&mut self, struct_name: &str);
+    fn serialize_field_name(&mut self, field_name: &str);
+    fn serialize_field_value<T: Ser<Self::Serializer>>(&mut self, value: &T);
+    fn end(self);
+}
+
 type DynSer<S> = DynMetadata<dyn Ser<S>>;
 
 const MAX_FIELDS: usize = 20;
 
 enum TypeSer<S: 'static> {
     Primitive(TypeKind),
-    Tuple([MaybeUninit<SerFieldInfo<S>>; MAX_FIELDS], usize),
-    Struct([MaybeUninit<SerFieldInfo<S>>; MAX_FIELDS], usize),
+    Tuple {
+        fields: [MaybeUninit<SerFieldInfo<S>>; MAX_FIELDS],
+        len: usize,
+    },
+    Struct {
+        fields: [MaybeUninit<SerFieldInfo<S>>; MAX_FIELDS],
+        len: usize,
+    },
     Array {
         len: usize,
-        elem: SerFieldInfo<S>,
+        elem: SerTypeInfo<S>,
     },
     Slice {
-        elem: SerFieldInfo<S>,
+        elem: SerTypeInfo<S>,
     },
     Reference {
         mutable: bool,
-        referent: SerFieldInfo<S>,
+        referent: SerTypeInfo<S>,
     },
     Other,
 }
@@ -102,13 +120,29 @@ struct SerFieldInfo<S: 'static> {
     name: &'static str,
     offset: usize,
     vtable: DynSer<S>,
-    type_id: TypeId,
+}
+
+struct SerTypeInfo<S: 'static> {
+    name: &'static str,
+    size: usize,
+    vtable: DynSer<S>,
 }
 
 impl<S: 'static> SerFieldInfo<S> {
-    unsafe fn to_dyn<T>(&self, ptr: &T) -> &dyn Ser<S> {
+    unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
         unsafe {
             let field_ptr = (ptr as *const T as *const u8).add(self.offset);
+            let fat_ptr =
+                std::ptr::from_raw_parts::<dyn Ser<S>>(field_ptr as *const (), self.vtable);
+            &*fat_ptr
+        }
+    }
+}
+
+impl<S: 'static> SerTypeInfo<S> {
+    unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
+        let field_ptr = ptr as *const T as *const u8;
+        unsafe {
             let fat_ptr =
                 std::ptr::from_raw_parts::<dyn Ser<S>>(field_ptr as *const (), self.vtable);
             &*fat_ptr
@@ -138,12 +172,14 @@ impl<S: Serializer + 'static> TypeSer<S> {
                             name: field.name,
                             offset: field.offset,
                             vtable: get_reflect_vtable::<S>(field.ty),
-                            type_id: field.ty,
                         })
                     };
                     i += 1;
                 }
-                TypeSer::Tuple(array, i)
+                TypeSer::Tuple {
+                    fields: array,
+                    len: i,
+                }
             }
             TypeKind::Struct(struct_fields) => {
                 let mut array = [const { MaybeUninit::<SerFieldInfo<S>>::uninit() }; MAX_FIELDS];
@@ -155,21 +191,22 @@ impl<S: Serializer + 'static> TypeSer<S> {
                             name: field.name,
                             offset: field.offset,
                             vtable: get_reflect_vtable::<S>(field.ty),
-                            type_id: field.ty,
                         })
                     };
                     i += 1;
                 }
-                TypeSer::Struct(array, i)
+                TypeSer::Struct {
+                    fields: array,
+                    len: i,
+                }
             }
             TypeKind::Array(array) => {
                 let ty = array.element_ty;
                 let type_info = ty.info();
-                let elem = SerFieldInfo {
-                    name: "",
-                    offset: type_info.size.unwrap(), // for array, the offset of the element is just the size of the element type
+                let elem = SerTypeInfo {
+                    name: "", // todo: get type name
+                    size: type_info.size.unwrap(),
                     vtable: get_reflect_vtable::<S>(ty),
-                    type_id: ty,
                 };
                 TypeSer::Array {
                     len: array.len,
@@ -179,11 +216,10 @@ impl<S: Serializer + 'static> TypeSer<S> {
             TypeKind::Slice(slice) => {
                 let ty = slice.element_ty;
                 let type_info = ty.info();
-                let elem = SerFieldInfo {
-                    name: "",
-                    offset: type_info.size.unwrap(), // for slice, the offset of the element is just the size of the element type
+                let elem = SerTypeInfo {
+                    name: "", // todo: get type name
+                    size: type_info.size.unwrap(),
                     vtable: get_reflect_vtable::<S>(ty),
-                    type_id: ty,
                 };
                 TypeSer::Slice { elem }
             }
@@ -209,12 +245,12 @@ impl<S: Serializer + 'static> TypeSer<S> {
         }
     }
 
-    pub const fn of<T: 'static>() -> Self {
+    pub const fn of<T: 'static + ?Sized>() -> Self {
         const { Self::from_type_id(TypeId::of::<T>()) }
     }
 }
 
-impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
+impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S> for T {
     fn serialize(&self, serializer: &mut S) {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
             specialized.specialized_serialize(serializer);
@@ -224,7 +260,7 @@ impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
                 TypeSer::Primitive(type_kind) => {
                     serialize_primitive(self, serializer, type_kind);
                 }
-                TypeSer::Struct(fields, len) => unsafe {
+                TypeSer::Struct { fields, len } => unsafe {
                     let fields = fields[..len].assume_init_ref();
                     let mut serializer = serializer.serialize_map();
                     for field in fields {
@@ -234,7 +270,7 @@ impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
                     }
                     serializer.end();
                 },
-                TypeSer::Tuple(fields, len) => unsafe {
+                TypeSer::Tuple { fields, len } => unsafe {
                     let fields = fields[..len].assume_init_ref();
                     let mut serializer = serializer.serialize_seq();
                     for field in fields {
@@ -246,21 +282,24 @@ impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
                 TypeSer::Array { len, elem } => unsafe {
                     let mut serializer = serializer.serialize_seq();
                     for i in 0..len {
-                        let field_ptr = (self as *const T as *const u8).add(i * elem.offset);
+                        let field_ptr = (self as *const T as *const u8).add(i * elem.size);
                         let field_value = elem.to_dyn(&*field_ptr.cast::<()>());
                         serializer.serialize_element(field_value);
                     }
                     serializer.end();
                 },
                 TypeSer::Slice { elem: _ } => todo!(),
-                TypeSer::Reference { mutable: _, referent: _ } => todo!(),
+                TypeSer::Reference {
+                    mutable: _,
+                    referent: _,
+                } => todo!(),
                 TypeSer::Other => todo!("{} other!", std::any::type_name::<T>()),
             }
         }
     }
 }
 
-fn serialize_primitive<T: 'static, S: Serializer>(
+fn serialize_primitive<T: 'static + ?Sized, S: Serializer>(
     this: &T,
     serializer: &mut S,
     type_kind: TypeKind,
@@ -313,167 +352,4 @@ fn serialize_primitive<T: 'static, S: Serializer>(
         }
         _ => unreachable!(),
     }
-}
-
-pub struct JsonSerializer {
-    output: String,
-}
-
-impl Serializer for JsonSerializer {
-    type Sequence<'b> = JsonSequenceSerializer<'b>;
-    type Map<'b> = JsonMapSerializer<'b>;
-
-    fn serialize_str(&mut self, value: &str) {
-        self.output.push('"');
-        self.output.push_str(value);
-        self.output.push('"');
-    }
-
-    fn serialize_i8(&mut self, value: i8) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_u8(&mut self, value: u8) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_i16(&mut self, value: i16) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_u16(&mut self, value: u16) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_i32(&mut self, value: i32) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_u32(&mut self, value: u32) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_i64(&mut self, value: i64) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_u64(&mut self, value: u64) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_i128(&mut self, value: i128) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_u128(&mut self, value: u128) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_bool(&mut self, value: bool) {
-        self.output.push_str(if value { "true" } else { "false" });
-    }
-
-    fn serialize_f32(&mut self, value: f32) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_f64(&mut self, value: f64) {
-        self.output.push_str(&value.to_string());
-    }
-
-    fn serialize_unit(&mut self) {
-        self.output.push_str("null");
-    }
-
-    fn serialize_some<T: Ser<Self>>(&mut self, value: &T) {
-        value.serialize(self);
-    }
-
-    fn serialize_none(&mut self) {
-        self.output.push_str("null");
-    }
-
-    fn serialize_seq(&mut self) -> Self::Sequence<'_> {
-        self.output.push('[');
-        JsonSequenceSerializer {
-            serializer: self,
-            first: true,
-        }
-    }
-
-    fn serialize_map(&mut self) -> Self::Map<'_> {
-        self.output.push('{');
-        JsonMapSerializer {
-            serializer: self,
-            first: true,
-        }
-    }
-}
-
-pub struct JsonSequenceSerializer<'a> {
-    serializer: &'a mut JsonSerializer,
-    first: bool,
-}
-
-impl SequenceSerializer for JsonSequenceSerializer<'_> {
-    type Serializer = JsonSerializer;
-
-    fn serialize_element<T: Ser<Self::Serializer> + ?Sized>(&mut self, value: &T) {
-        if self.first {
-            self.first = false;
-        } else {
-            self.serializer.output.push(',');
-        }
-        value.serialize(self.serializer);
-    }
-
-    fn end(self) {
-        self.serializer.output.push(']');
-    }
-}
-
-pub struct JsonMapSerializer<'a> {
-    serializer: &'a mut JsonSerializer,
-    first: bool,
-}
-
-impl MapSerializer for JsonMapSerializer<'_> {
-    type Serializer = JsonSerializer;
-
-    fn serialize_key<K: Ser<Self::Serializer> + ?Sized>(&mut self, key: &K) {
-        if self.first {
-            self.first = false;
-        } else {
-            self.serializer.output.push(',');
-        }
-        key.serialize(self.serializer);
-        self.serializer.output.push(':');
-    }
-    fn serialize_value<V: Ser<Self::Serializer> + ?Sized>(&mut self, value: &V) {
-        value.serialize(self.serializer);
-    }
-    fn end(self) {
-        self.serializer.output.push('}');
-    }
-}
-
-#[test]
-fn test_u32() {
-    let mut json = JsonSerializer {
-        output: String::new(),
-    };
-    std::hint::black_box((6_u32).serialize(&mut json));
-    assert_eq!(json.output, "6");
-}
-
-#[test]
-fn test_struct() {
-    struct A {
-        first: u32
-    }
-    let mut json = JsonSerializer {
-        output: String::new(),
-    };
-    std::hint::black_box((A { first: 1 }).serialize(&mut json));
-    assert_eq!(json.output, "{\"first\":1}");
 }
