@@ -26,7 +26,7 @@ pub(crate) trait SpecializedSerInner<S: Serializer> {
 }
 
 pub trait Serializer: Sized {
-    type Error;
+    type Error: SerializeError;
     type Sequence<'a>: SequenceSerializer<Serializer = Self>
     where
         Self: 'a;
@@ -61,6 +61,9 @@ pub trait Serializer: Sized {
     fn serialize_display<T: std::fmt::Display>(&mut self, value: T) -> Result<(), Self::Error> {
         self.serialize_str(&value.to_string())
     }
+}
+
+pub trait SerializeError {
 }
 
 pub trait SequenceSerializer {

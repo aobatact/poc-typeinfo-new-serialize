@@ -42,6 +42,8 @@ pub enum JsonSerializeError {
     Io(std::io::Error),
 }
 
+impl SerializeError for JsonSerializeError {}
+
 impl From<std::io::Error> for JsonSerializeError {
     fn from(err: std::io::Error) -> Self {
         JsonSerializeError::Io(err)
