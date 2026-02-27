@@ -63,3 +63,12 @@ specialized_ser_via_deref_inner!(std::sync::Mutex<T>, T: ?Sized);
 specialized_ser_via_deref_inner!(std::sync::RwLock<T>, T: ?Sized);
 specialized_ser_via_deref_inner!(std::pin::Pin<T>, T);
 specialized_ser_via_deref_inner!(std::mem::ManuallyDrop<T>, T: ?Sized);
+
+specialized_ser_seq_inner!(std::collections::VecDeque<T>, T: Ser<S>);
+specialized_ser_seq_inner!(std::collections::HashSet<T>, T: Ser<S>);
+specialized_ser_seq_inner!(std::collections::BTreeSet<T>, T: Ser<S>);
+specialized_ser_seq_inner!(std::collections::BinaryHeap<T>, T: Ser<S>);
+specialized_ser_seq_inner!(std::collections::LinkedList<T>, T: Ser<S>);
+
+specialized_ser_map_inner!(std::collections::HashMap<K, V>, K: Ser<S>, V: Ser<S>);
+specialized_ser_map_inner!(std::collections::BTreeMap<K, V>, K: Ser<S>, V: Ser<S>);
