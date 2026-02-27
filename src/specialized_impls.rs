@@ -2,8 +2,8 @@ use super::*;
 use std::{ffi::OsStr, ops::Deref, path::Path};
 
 impl<T: 'static, S: Serializer + 'static> Ser<S> for [T] {
-    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
-        let mut seq = serializer.serialize_seq()?;
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
         for elem in self {
             seq.serialize_element(elem)?;
         }
@@ -12,25 +12,25 @@ impl<T: 'static, S: Serializer + 'static> Ser<S> for [T] {
 }
 
 impl<S: Serializer> Ser<S> for str {
-    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self)
     }
 }
 
 impl<S: Serializer> Ser<S> for OsStr {
-    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.to_string_lossy().as_ref())
     }
 }
 
 impl<S: Serializer> Ser<S> for Path {
-    fn serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_os_str().to_string_lossy().as_ref())
     }
 }
 
 impl<T: Ser<S>, S: Serializer> SpecializedSerInner<S> for Option<T> {
-    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         match self {
             Some(value) => serializer.serialize_some(value),
             None => serializer.serialize_none(),
@@ -39,7 +39,7 @@ impl<T: Ser<S>, S: Serializer> SpecializedSerInner<S> for Option<T> {
 }
 
 impl<S: Serializer> SpecializedSerInner<S> for &str {
-    fn specialized_serialize(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self)
     }
 }
@@ -63,5 +63,3 @@ specialized_ser_via_deref_inner!(std::sync::Mutex<T>, T: ?Sized);
 specialized_ser_via_deref_inner!(std::sync::RwLock<T>, T: ?Sized);
 specialized_ser_via_deref_inner!(std::pin::Pin<T>, T);
 specialized_ser_via_deref_inner!(std::mem::ManuallyDrop<T>, T: ?Sized);
-
-
