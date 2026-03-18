@@ -1,3 +1,7 @@
+/// Helper macro that implements a serialization trait for a type by delegating
+/// to its [`Display`](std::fmt::Display) implementation (serializes as a string).
+///
+/// Used by [`specialized_ser_via_display_inner!`] and [`specialized_ser_via_display!`].
 #[macro_export]
 macro_rules! specialized_ser_via_display_base {
     ($ty: ty, $trait: ident) => {
@@ -9,6 +13,10 @@ macro_rules! specialized_ser_via_display_base {
     };
 }
 
+/// Implements [`SpecializedSerInner`] for a type by delegating to its `Display` impl.
+///
+/// Use this for standard library types that should be serialized as strings
+/// (e.g. `IpAddr`, `Ipv4Addr`).
 #[macro_export]
 macro_rules! specialized_ser_via_display_inner {
     ($ty: ty) => {
@@ -16,6 +24,9 @@ macro_rules! specialized_ser_via_display_inner {
     };
 }
 
+/// Implements [`SpecializedSer`] for a type by delegating to its `Display` impl.
+///
+/// Use this for downstream types that should be serialized as strings.
 #[macro_export]
 macro_rules! specialized_ser_via_display {
     ($ty: ty) => {
@@ -23,6 +34,10 @@ macro_rules! specialized_ser_via_display {
     };
 }
 
+/// Helper macro that implements a serialization trait for a type by delegating
+/// to the [`Deref`](std::ops::Deref) target's `Ser` implementation.
+///
+/// Supports both non-generic types and types with generic parameters.
 #[macro_export]
 macro_rules! specialized_ser_via_deref_base {
     ($ty: ty, $trait: ident) => {
@@ -42,6 +57,10 @@ macro_rules! specialized_ser_via_deref_base {
     };
 }
 
+/// Implements [`SpecializedSerInner`] for a type by serializing through its `Deref` target.
+///
+/// This is used for wrapper types like `String` (derefs to `str`), `Vec<T>` (derefs to `[T]`),
+/// `Box<T>`, `Arc<T>`, etc.
 #[macro_export]
 macro_rules! specialized_ser_via_deref_inner {
     ($ty: ty) => {
@@ -60,6 +79,10 @@ macro_rules! specialized_ser_via_deref_inner {
 //     };
 // }
 
+/// Helper macro that implements a serialization trait for an iterable collection
+/// type by serializing it as a sequence.
+///
+/// The type must implement `IntoIterator` (via `for elem in self`) and provide a `len()` method.
 #[macro_export]
 macro_rules! specialized_ser_seq_base {
     ($ty: ty, $trait: ident, $($generics: tt)+) => {
@@ -75,6 +98,9 @@ macro_rules! specialized_ser_seq_base {
     };
 }
 
+/// Implements [`SpecializedSerInner`] for an iterable collection, serializing it as a sequence.
+///
+/// Used for `VecDeque`, `HashSet`, `BTreeSet`, `BinaryHeap`, `LinkedList`, etc.
 #[macro_export]
 macro_rules! specialized_ser_seq_inner {
     ($ty: ty, $($generics: tt)+) => {
@@ -82,6 +108,10 @@ macro_rules! specialized_ser_seq_inner {
     };
 }
 
+/// Helper macro that implements a serialization trait for a map-like collection
+/// by serializing it as key-value pairs.
+///
+/// The type must implement `IntoIterator` yielding `(K, V)` pairs and provide a `len()` method.
 #[macro_export]
 macro_rules! specialized_ser_map_base {
     ($ty: ty, $trait: ident, $($generics: tt)+) => {
@@ -97,6 +127,9 @@ macro_rules! specialized_ser_map_base {
     };
 }
 
+/// Implements [`SpecializedSerInner`] for a map-like collection, serializing it as a map.
+///
+/// Used for `HashMap` and `BTreeMap`.
 #[macro_export]
 macro_rules! specialized_ser_map_inner {
     ($ty: ty, $($generics: tt)+) => {

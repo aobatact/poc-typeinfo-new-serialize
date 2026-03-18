@@ -1,44 +1,80 @@
+//! A minimal JSON [`Serializer`] implementation.
+//!
+//! Writes JSON output to any [`std::io::Write`] destination. Provides
+//! convenience methods when backed by a `Vec<u8>` for in-memory serialization.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use poc_typeinfo_new_deser::{Ser, json::JsonSerializer};
+//!
+//! let mut ser = JsonSerializer::new_vec();
+//! (42_u32).serialize(&mut ser).unwrap();
+//! assert_eq!(ser.as_str(), "42");
+//! ```
+
 use super::*;
 use std::io::Write;
 
+/// A JSON serializer that writes output to a [`Write`] destination.
+///
+/// Use [`JsonSerializer::new`] to wrap any writer, or [`JsonSerializer::new_vec`]
+/// for convenient in-memory serialization to a `Vec<u8>`.
 pub struct JsonSerializer<W: Write> {
     writer: W,
 }
 
 impl<W: Write> JsonSerializer<W> {
+    /// Creates a new `JsonSerializer` that writes JSON to the given writer.
     pub fn new(writer: W) -> Self {
         Self { writer }
     }
 
+    /// Consumes the serializer and returns the underlying writer.
     pub fn into_inner(self) -> W {
         self.writer
     }
 }
 
 impl JsonSerializer<Vec<u8>> {
+    /// Creates a new `JsonSerializer` backed by an empty `Vec<u8>`.
     pub fn new_vec() -> Self {
         Self { writer: Vec::new() }
     }
 
+    /// Consumes the serializer and returns the underlying byte buffer.
     pub fn into_vec(self) -> Vec<u8> {
         self.writer
     }
 
+    /// Returns the serialized output as a byte slice.
     pub fn as_bytes(&self) -> &[u8] {
         &self.writer
     }
 
+    /// Returns the serialized output as a UTF-8 string slice.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the output is not valid UTF-8 (should not happen with well-formed JSON).
     pub fn as_str(&self) -> &str {
         std::str::from_utf8(&self.writer).unwrap()
     }
 
+    /// Consumes the serializer and returns the output as a `String`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the output is not valid UTF-8.
     pub fn into_string(self) -> String {
         String::from_utf8(self.writer).unwrap()
     }
 }
 
+/// Errors that can occur during JSON serialization.
 #[derive(Debug)]
 pub enum JsonSerializeError {
+    /// An I/O error from the underlying writer.
     Io(std::io::Error),
 }
 
@@ -314,6 +350,7 @@ impl<W: Write> Serializer for JsonSerializer<W> {
 
 // --- SerializeSeq ---
 
+/// JSON state for serializing a sequence (e.g. `[1,2,3]`).
 pub struct JsonSerializeSeq<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
@@ -342,6 +379,7 @@ impl<W: Write> SerializeSeq for JsonSerializeSeq<'_, W> {
 
 // --- SerializeTuple ---
 
+/// JSON state for serializing a tuple (e.g. `[1,"a",true]`).
 pub struct JsonSerializeTuple<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
@@ -370,6 +408,7 @@ impl<W: Write> SerializeTuple for JsonSerializeTuple<'_, W> {
 
 // --- SerializeTupleStruct ---
 
+/// JSON state for serializing a tuple struct (e.g. `[1,2,3]`).
 pub struct JsonSerializeTupleStruct<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
@@ -398,6 +437,7 @@ impl<W: Write> SerializeTupleStruct for JsonSerializeTupleStruct<'_, W> {
 
 // --- SerializeTupleVariant ---
 
+/// JSON state for serializing a tuple variant (e.g. `{"Variant":[1,2]}`).
 pub struct JsonSerializeTupleVariant<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
@@ -426,6 +466,7 @@ impl<W: Write> SerializeTupleVariant for JsonSerializeTupleVariant<'_, W> {
 
 // --- SerializeMap ---
 
+/// JSON state for serializing a map (e.g. `{"key":"value"}`).
 pub struct JsonSerializeMap<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
@@ -463,6 +504,7 @@ impl<W: Write> SerializeMap for JsonSerializeMap<'_, W> {
 
 // --- SerializeStruct ---
 
+/// JSON state for serializing a struct (e.g. `{"field":value}`).
 pub struct JsonSerializeStruct<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
@@ -494,6 +536,7 @@ impl<W: Write> SerializeStruct for JsonSerializeStruct<'_, W> {
 
 // --- SerializeStructVariant ---
 
+/// JSON state for serializing a struct variant (e.g. `{"Variant":{"field":value}}`).
 pub struct JsonSerializeStructVariant<'a, W: Write> {
     serializer: &'a mut JsonSerializer<W>,
     first: bool,
