@@ -65,6 +65,38 @@ impl<S: Serializer> SpecializedSerInner<S> for &str {
     }
 }
 
+// --- Primitive serialization via SpecializedSerInner (feature-gated) ---
+
+#[cfg(feature = "primitive-specialized")]
+macro_rules! specialized_ser_primitive {
+    ($ty:ty, $method:ident) => {
+        impl<S: Serializer + 'static> SpecializedSerInner<S> for $ty {
+            fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+                serializer.$method(*self)
+            }
+        }
+    };
+}
+
+#[cfg(feature = "primitive-specialized")]
+mod _primitive_impls {
+    use super::*;
+    specialized_ser_primitive!(bool, serialize_bool);
+    specialized_ser_primitive!(char, serialize_char);
+    specialized_ser_primitive!(i8, serialize_i8);
+    specialized_ser_primitive!(i16, serialize_i16);
+    specialized_ser_primitive!(i32, serialize_i32);
+    specialized_ser_primitive!(i64, serialize_i64);
+    specialized_ser_primitive!(i128, serialize_i128);
+    specialized_ser_primitive!(u8, serialize_u8);
+    specialized_ser_primitive!(u16, serialize_u16);
+    specialized_ser_primitive!(u32, serialize_u32);
+    specialized_ser_primitive!(u64, serialize_u64);
+    specialized_ser_primitive!(u128, serialize_u128);
+    specialized_ser_primitive!(f32, serialize_f32);
+    specialized_ser_primitive!(f64, serialize_f64);
+}
+
 // --- Display-based serialization (serialized as strings) ---
 
 specialized_ser_via_display_inner!(std::net::IpAddr);
