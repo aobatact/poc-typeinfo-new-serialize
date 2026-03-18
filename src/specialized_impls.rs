@@ -97,6 +97,35 @@ specialized_ser_seq_inner!(std::collections::BTreeSet<T>, T: Ser<S>);
 specialized_ser_seq_inner!(std::collections::BinaryHeap<T>, T: Ser<S>);
 specialized_ser_seq_inner!(std::collections::LinkedList<T>, T: Ser<S>);
 
+// --- NonZero serialization (serialized as the underlying integer) ---
+
+macro_rules! specialized_ser_nonzero {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl<S: Serializer + 'static> SpecializedSerInner<S> for $ty {
+                fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+                    self.get().serialize(serializer)
+                }
+            }
+        )*
+    };
+}
+
+specialized_ser_nonzero!(
+    std::num::NonZeroU8,
+    std::num::NonZeroU16,
+    std::num::NonZeroU32,
+    std::num::NonZeroU64,
+    std::num::NonZeroU128,
+    std::num::NonZeroUsize,
+    std::num::NonZeroI8,
+    std::num::NonZeroI16,
+    std::num::NonZeroI32,
+    std::num::NonZeroI64,
+    std::num::NonZeroI128,
+    std::num::NonZeroIsize,
+);
+
 // --- Map-based serialization (serialized as JSON objects) ---
 
 specialized_ser_map_inner!(std::collections::HashMap<K, V>, K: Ser<S>, V: Ser<S>);

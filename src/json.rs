@@ -678,6 +678,39 @@ mod tests {
     }
 
     #[test]
+    fn test_nonzero_u32() {
+        let mut json = JsonSerializer::new_vec();
+        let val = std::num::NonZeroU32::new(42).unwrap();
+        val.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "42");
+    }
+
+    #[test]
+    fn test_nonzero_i64() {
+        let mut json = JsonSerializer::new_vec();
+        let val = std::num::NonZeroI64::new(-100).unwrap();
+        val.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), "-100");
+    }
+
+    #[test]
+    fn test_nonzero_in_struct() {
+        struct Config {
+            #[allow(unused)]
+            port: std::num::NonZeroU16,
+            #[allow(unused)]
+            retries: std::num::NonZeroU8,
+        }
+        let mut json = JsonSerializer::new_vec();
+        let cfg = Config {
+            port: std::num::NonZeroU16::new(8080).unwrap(),
+            retries: std::num::NonZeroU8::new(3).unwrap(),
+        };
+        cfg.serialize(&mut json).unwrap();
+        assert_eq!(json.as_str(), r#"{"port":8080,"retries":3}"#);
+    }
+
+    #[test]
     fn test_hashmap() {
         use std::collections::HashMap;
         let mut json = JsonSerializer::new_vec();
