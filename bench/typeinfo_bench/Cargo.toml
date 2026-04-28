@@ -1,0 +1,11 @@
+[package]
+name = "typeinfo_bench"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+poc-typeinfo-new-deser = { path = "../.." }
+
+[[bin]]
+name = "typeinfo_bench"
+path = "src/main.rs"
