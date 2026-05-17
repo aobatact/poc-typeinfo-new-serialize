@@ -33,6 +33,7 @@
 #![feature(try_as_dyn)]
 #![feature(type_info)]
 #![feature(ptr_metadata)]
+#![feature(min_specialization)]
 
 use core::str;
 use std::{
@@ -384,13 +385,24 @@ enum TypeSer<S: 'static> {
         len: usize,
         elem: SerTypeInfo<S>,
     },
-    // Slice {
-    //     elem: SerTypeInfo<S>,
-    // },
-    /// A reference `&T`, with the pointee's size and vtable.
+    /// A dynamically-sized slice `[T]`, with element size and vtable.
+    /// The slice length is recovered at runtime from `size_of_val`.
+    Slice {
+        elem: SerTypeInfo<S>,
+    },
+    /// The dynamically-sized string slice `str`.
+    /// The byte length is recovered at runtime from `size_of_val`.
+    Str,
+    /// A reference `&T` to a sized pointee, with the pointee's size and vtable.
     Reference {
         referent: SerTypeInfo<S>,
     },
+    /// A reference `&[T]` to a dynamically-sized slice.
+    SliceReference {
+        elem: SerTypeInfo<S>,
+    },
+    /// A reference `&str` to a dynamically-sized string.
+    StrReference,
     /// A type whose structure is not directly supported by reflection
     /// (e.g. enums, unions). Falls back to `todo!()` at runtime.
     Other,
@@ -513,10 +525,9 @@ impl<S: Serializer + 'static> TypeSer<S> {
             }
             TypeKind::Array(array) => {
                 let ty = array.element_ty;
-                let type_info = ty.info();
                 let elem = SerTypeInfo {
                     name: "", // todo: get type name
-                    size: type_info.size.unwrap(),
+                    size: ty.size().unwrap(),
                     vtable: get_reflect_vtable::<S>(ty),
                 };
                 TypeSer::Array {
@@ -524,35 +535,45 @@ impl<S: Serializer + 'static> TypeSer<S> {
                     elem,
                 }
             }
-            // TypeKind::Slice(slice) => {
-            //     let ty = slice.element_ty;
-            //     let type_info = ty.info();
-            //     let elem = SerTypeInfo {
-            //         name: "", // todo: get type name
-            //         size: type_info.size.unwrap(),
-            //         vtable: get_reflect_vtable::<S>(ty),
-            //     };
-            //     TypeSer::Slice { elem }
-            // }
-            TypeKind::Reference(reference) => {
-                let Some(size) = reference.pointee.info().size else {
-                    // Unsized types behind references are not supported here, since `try_as_dyn` currently only works for sized types.
-                    // When `try_as_dyn` is extended to support `?Sized` types, we can remove this check and handle unsized types behind references as well.
-                    return TypeSer::Other;
-                };
-                let ty = reference.pointee;
-                let referent = SerTypeInfo {
+            TypeKind::Slice(slice) => {
+                let ty = slice.element_ty;
+                let elem = SerTypeInfo {
                     name: "", // todo: get type name
-                    size,
+                    size: ty.size().unwrap(),
                     vtable: get_reflect_vtable::<S>(ty),
                 };
-                TypeSer::Reference { referent }
+                TypeSer::Slice { elem }
             }
-            TypeKind::Bool(_)
-            | TypeKind::Char(_)
-            | TypeKind::Int(_)
-            | TypeKind::Float(_)
-            | TypeKind::Str(_) => TypeSer::Primitive(type_info.kind),
+            TypeKind::Reference(reference) => {
+                let ty = reference.pointee;
+                match ty.size() {
+                    Some(size) => {
+                        let referent = SerTypeInfo {
+                            name: "", // todo: get type name
+                            size,
+                            vtable: get_reflect_vtable::<S>(ty),
+                        };
+                        TypeSer::Reference { referent }
+                    }
+                    None => match ty.info().kind {
+                        TypeKind::Slice(slice) => {
+                            let elem_ty = slice.element_ty;
+                            let elem = SerTypeInfo {
+                                name: "", // todo: get type name
+                                size: elem_ty.size().unwrap(),
+                                vtable: get_reflect_vtable::<S>(elem_ty),
+                            };
+                            TypeSer::SliceReference { elem }
+                        }
+                        TypeKind::Str(_) => TypeSer::StrReference,
+                        _ => TypeSer::Other,
+                    },
+                }
+            }
+            TypeKind::Str(_) => TypeSer::Str,
+            TypeKind::Bool(_) | TypeKind::Char(_) | TypeKind::Int(_) | TypeKind::Float(_) => {
+                TypeSer::Primitive(type_info.kind)
+            }
             _ => TypeSer::Other,
         }
     }
@@ -563,8 +584,8 @@ impl<S: Serializer + 'static> TypeSer<S> {
     }
 }
 
-impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S> for T {
-    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+impl<T: 'static + ?Sized, S: Serializer + 'static> Ser<S> for T {
+    default fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
             specialized.specialized_serialize(serializer)
         } else if let Some(specialized) =
@@ -602,13 +623,47 @@ impl<T: 'static /* can't add `+ ?Sized` now` */, S: Serializer + 'static> Ser<S>
                     }
                     seq.end()
                 },
-                // Slice is handled by the impl for [T] in specialized_impls.rs, so we can assume it's never returned by TypeSer::of
-                // When T try_as_dyn can be used for ?Sized types, we can remove this assumption and handle slices here as well.
-                // TypeSer::Slice { elem: _ } => unreachable!(),
+                TypeSer::Slice { elem } => unsafe {
+                    let total_bytes = std::mem::size_of_val::<T>(self);
+                    let len = total_bytes / elem.size;
+                    let data_ptr = self as *const T as *const u8;
+                    let mut seq = serializer.serialize_seq(Some(len))?;
+                    for i in 0..len {
+                        let elem_ptr = data_ptr.add(i * elem.size);
+                        let elem_value = elem.to_dyn(&*elem_ptr.cast::<()>());
+                        seq.serialize_element(elem_value)?;
+                    }
+                    seq.end()
+                },
+                TypeSer::Str => unsafe {
+                    let data_ptr = self as *const T as *const u8;
+                    let len = std::mem::size_of_val::<T>(self);
+                    let bytes = std::slice::from_raw_parts(data_ptr, len);
+                    serializer.serialize_str(std::str::from_utf8_unchecked(bytes))
+                },
                 TypeSer::Reference { referent } => unsafe {
                     let pointee_ptr = *(self as *const T as *const *const u8);
                     let pointee = referent.to_dyn(&*pointee_ptr.cast::<()>());
                     pointee.serialize(serializer)
+                },
+                TypeSer::SliceReference { elem } => unsafe {
+                    // `T` is statically `&[U]` here, so reading 16 bytes at
+                    // `self` yields the slice's `(data, len)` fat pointer.
+                    let parts = self as *const T as *const (*const u8, usize);
+                    let (data_ptr, len) = *parts;
+                    let mut seq = serializer.serialize_seq(Some(len))?;
+                    for i in 0..len {
+                        let elem_ptr = data_ptr.add(i * elem.size);
+                        let elem_value = elem.to_dyn(&*elem_ptr.cast::<()>());
+                        seq.serialize_element(elem_value)?;
+                    }
+                    seq.end()
+                },
+                TypeSer::StrReference => unsafe {
+                    let parts = self as *const T as *const (*const u8, usize);
+                    let (data_ptr, len) = *parts;
+                    let bytes = std::slice::from_raw_parts(data_ptr, len);
+                    serializer.serialize_str(std::str::from_utf8_unchecked(bytes))
                 },
                 TypeSer::Other => todo!("{} other!", std::any::type_name::<T>()),
             }
@@ -671,9 +726,6 @@ fn serialize_primitive<T: 'static + ?Sized, S: Serializer>(
                 _ => unreachable!(),
             }
         },
-        TypeKind::Str(_str) => {
-            unreachable!() // str should be handled by SpecializedSerInner
-        }
         _ => unreachable!(),
     }
 }

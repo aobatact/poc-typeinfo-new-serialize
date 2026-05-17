@@ -1,14 +1,15 @@
 //! Specialized [`Ser`] implementations for standard library types.
 //!
-//! These implementations handle types that cannot be serialized through the
-//! generic reflection-based blanket impl, either because they are unsized
-//! (e.g. `[T]`, `str`) or because they require custom serialization logic
-//! (e.g. `Option<T>`, `String`, `Vec<T>`, smart pointers, collections).
+//! These implementations handle types that require custom serialization logic
+//! (e.g. `Option<T>`, `String`, `Vec<T>`, smart pointers, collections), or
+//! unsized types whose default reflection-based serialization is not the
+//! desired output (e.g. `OsStr`, `Path`).
 //!
 //! The implementations are split into two categories:
 //!
-//! - **Direct `Ser` impls**: for unsized types (`[T]`, `str`, `OsStr`, `Path`)
-//!   that cannot go through the `T: 'static` blanket impl.
+//! - **Direct `Ser` impls**: specializations of the blanket impl for unsized
+//!   types (`OsStr`, `Path`) whose reflection-based serialization would not
+//!   produce the desired string output.
 //! - **`SpecializedSerInner` impls**: for sized types (`Option<T>`, `&str`,
 //!   `String`, `Vec<T>`, `Box<T>`, collections, etc.) that override the blanket
 //!   impl via `try_as_dyn` dispatch.
@@ -16,33 +17,15 @@
 use super::*;
 use std::{ffi::OsStr, ops::Deref, path::Path};
 
-/// Serializes a slice `[T]` as a sequence.
-impl<T: Ser<S>, S: Serializer + 'static> Ser<S> for [T] {
-    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for elem in self {
-            seq.serialize_element(elem)?;
-        }
-        seq.end()
-    }
-}
-
-/// Serializes a `str` slice as a string.
-impl<S: Serializer> Ser<S> for str {
-    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self)
-    }
-}
-
 /// Serializes an `OsStr` as a string (with lossy UTF-8 conversion).
-impl<S: Serializer> Ser<S> for OsStr {
+impl<S: Serializer + 'static> Ser<S> for OsStr {
     fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.to_string_lossy().as_ref())
     }
 }
 
 /// Serializes a `Path` as a string (with lossy UTF-8 conversion).
-impl<S: Serializer> Ser<S> for Path {
+impl<S: Serializer + 'static> Ser<S> for Path {
     fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_os_str().to_string_lossy().as_ref())
     }
