@@ -60,7 +60,62 @@ field offset と組み合わせて `&dyn Ser<S>` の fat pointer を手で組み
 ここで fat pointer 取得とその構造化をコンパイル時に先に処理してしまうことによって、
 実行時に 型ごとの分岐がいらなくなるようにしています。
 
-ただここにはトレードオフがあって、これによって対応できるフィールドの数が固定化されてしまいます。`const heap`等が実装されるまでこの制限はとれません。
+vtable 取得は `TypeId` だけを入力にとる `const fn` として書けます:
+
+```rust
+const fn get_reflect_vtable<S: Serializer + 'static>(type_id: TypeId) -> DynMetadata<dyn Ser<S>> {
+    let trait_id = TypeId::of::<dyn Ser<S>>();
+    match type_id.trait_info_of_trait_type_id(trait_id) {
+        Some(t) => unsafe { std::mem::transmute(t.get_vtable()) },
+        None => panic!("type does not implement Ser"),
+    }
+}
+```
+
+そしてフィールドごとに「offset + vtable」を `SerFieldInfo` に詰めておけば、
+実行時には親オブジェクトの先頭ポインタにオフセットを足して fat pointer を組むだけで `&dyn Ser<S>` が手に入ります:
+
+```rust
+struct SerFieldInfo<S: 'static> {
+    name: &'static str,
+    offset: usize,
+    vtable: DynMetadata<dyn Ser<S>>,
+}
+
+impl<S: 'static> SerFieldInfo<S> {
+    const unsafe fn to_dyn<T: ?Sized>(&self, ptr: &T) -> &dyn Ser<S> {
+        unsafe {
+            let field_ptr = (ptr as *const T as *const u8).add(self.offset);
+            let fat_ptr = std::ptr::from_raw_parts::<dyn Ser<S>>(field_ptr as *const (), self.vtable);
+            &*fat_ptr
+        }
+    }
+}
+```
+
+これを型ごとに 1 度だけ走らせて、`MaybeUninit` の固定長配列に詰めたものを `const { TypeSer::<S>::of::<T>() }` で取り出します。`TypeSer` を const 評価の段階で完成させてしまうことで、実行時は固定長配列を舐めるだけで済みます。
+
+```rust
+match type_info.kind {
+    TypeKind::Struct(struct_fields) => {
+        let mut array = [const { MaybeUninit::<SerFieldInfo<S>>::uninit() }; MAX_FIELDS];
+        let mut i = 0;
+        while i < struct_fields.fields.len() && i < MAX_FIELDS {
+            let field = &struct_fields.fields[i];
+            array[i] = MaybeUninit::new(SerFieldInfo {
+                name: field.name,
+                offset: field.offset,
+                vtable: get_reflect_vtable::<S>(field.ty),
+            });
+            i += 1;
+        }
+        TypeSer::Struct { fields: array, len: i }
+    }
+    // ... Tuple / Array / Reference / Primitive も同じノリ
+}
+```
+
+ただここにはトレードオフがあって、これによって対応できるフィールドの数が固定化されてしまいます (PoC では `MAX_FIELDS = 20`)。`const heap`等が実装されるまでこの制限はとれません。
 
 ## 実装: 2 階層の特殊化（SpecializedSer / SpecializedSerInner） 
 
@@ -72,9 +127,104 @@ field offset と組み合わせて `&dyn Ser<S>` の fat pointer を手で組み
 また、すこし工夫した点として、特殊化に使うトレイトを内部用と外部用とで分けることで、
 stdの型でもそのシリアライザにあった特殊化ができる余地を用意しています。
 
+トレイトの定義はこれだけです:
+
+```rust
+pub trait Ser<S: Serializer> {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error>;
+}
+
+// ユーザー側で使う特殊化
+pub trait SpecializedSer<S: Serializer> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error>;
+}
+
+// std向けに使う特殊化 (crate 内部用)
+pub(crate) trait SpecializedSerInner<S: Serializer> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error>;
+}
+```
+
+すべての `T: 'static` に対して blanket impl を一発で書き、その中で `try_as_dyn` を使って優先度順に特殊化を試し、最後に reflection に落ちます:
+
+```rust
+impl<T: 'static, S: Serializer + 'static> Ser<S> for T {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+        // 1. ユーザー定義の特殊化があれば最優先
+        if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
+            specialized.specialized_serialize(serializer)
+        // 2. std型用の crate 内部特殊化
+        } else if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSerInner<S>>(self) {
+            specialized.specialized_serialize(serializer)
+        // 3. それ以外は reflection でフィールドを舐める
+        } else {
+            let type_ser = const { TypeSer::<S>::of::<T>() };
+            // ... TypeSer の variant ごとに分岐
+        }
+    }
+}
+```
+
+`SpecializedSer` の枠を 1 つユーザーに残しつつ、`String` や `Vec<T>` などは `SpecializedSerInner` 側で先に実装してあるので、std 型の挙動を奪われずに済みます。
+
 ## 実装: 複合型が動く様子 
-<!-- → struct / tuple / 配列 / 参照 の serialize ロジック（最小コード断片）。 
-→ Option / Vec / String / HashMap など std 型の特殊化は代表例だけ紹介。  -->
+
+reflection 経路では、`const` で組み立てた `TypeSer<S>` を `match` するだけで struct / tuple / 配列 / 参照 が動きます。たとえば struct の枝はこうなります:
+
+```rust
+TypeSer::Struct { fields, len } => unsafe {
+    let fields = fields[..len].assume_init_ref();
+    let mut s = serializer.serialize_struct(std::any::type_name::<T>(), len)?;
+    for field in fields {
+        // SerFieldInfo::to_dyn が offset + vtable で &dyn Ser<S> を組み立てる
+        let field_value = field.to_dyn(self);
+        s.serialize_field(field.name, field_value)?;
+    }
+    s.end()
+},
+TypeSer::Array { len, elem } => unsafe {
+    let mut seq = serializer.serialize_seq(Some(len))?;
+    for i in 0..len {
+        let field_ptr = (self as *const T as *const u8).add(i * elem.size);
+        let field_value = elem.to_dyn(&*field_ptr.cast::<()>());
+        seq.serialize_element(field_value)?;
+    }
+    seq.end()
+},
+TypeSer::Reference { referent } => unsafe {
+    let pointee_ptr = *(self as *const T as *const *const u8);
+    let pointee = referent.to_dyn(&*pointee_ptr.cast::<()>());
+    pointee.serialize(serializer)
+},
+```
+
+std 型は `SpecializedSerInner` 側で短く書きます。たとえば `Option<T>` と `Vec<T>` はそれぞれこれだけ:
+
+```rust
+impl<T: Ser<S>, S: Serializer> SpecializedSerInner<S> for Option<T> {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+        match self {
+            Some(value) => serializer.serialize_some(value),
+            None => serializer.serialize_none(),
+        }
+    }
+}
+
+// Vec<T> や Box<T>, Arc<T> ... は Deref に委譲するマクロでまとめて生やしている
+specialized_ser_via_deref_inner!(std::vec::Vec<T>, T);
+specialized_ser_via_deref_inner!(std::boxed::Box<T>, T: ?Sized);
+```
+
+実際に使う側からは proc macro なしでこう書けます:
+
+```rust
+struct Point { x: f64, y: f64 }
+
+let mut json = JsonSerializer::new_vec();
+(Point { x: 1.0, y: 2.0 }).serialize(&mut json).unwrap();
+assert_eq!(json.as_str(), r#"{"x":1,"y":2}"#);
+```
+
 
 ## ビルド時間を測ってみた 
 → ベンチ設計: 同一の 8 フィールド構造体 200 個、serde+derive 版 と PoC  reflection 版で比較。 
