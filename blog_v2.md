@@ -39,28 +39,42 @@ derive マクロはもう不要？ Rust nightly の進展で複合型シリア�
 前回の記事の時点では、型情報からフィールドの情報はとれても、
 そこからそのフィールドがどうやってシリアライズできるかを取得することはできませんでした。
 型からどのトレイトの関数を呼ぶ手段がなかったからです。
+型ごとにどうトレイトが実装されているかは当時でも`try_as_dyn`で取得できましたが、
+`T`の型がわかっている前提で、`TypeId`からはトレイトオブジェクトを取得することができないままでした。なので配列の要素や構造体のフィールドの型として取得したの`TypeId`を処理することができなかったのです。
+
 <!-- → 「TypeId から trait への変換ができない」が最大の壁だったこと、3〜4 行で。 -->
 
-## 何が変わったか（進展ダイジェスト） 
-- `TypeId::trait_info_of_trait_type_id` で TypeId → `dyn Ser<S>` の vtable が引けるようになった 
-- これにより Struct / Tuple / Array / Reference の reflection が書けるようになった 
--  reflection のみで対応できる型カテゴリが **1 → 5** に拡大 
+## std側で何が変わったか
+
+`TypeId::trait_info_of_trait_type_id` で TypeId → `dyn Ser<S>` の vtable が引けるようになりました！
+これによってそれぞれの内側の型の`TypeId`から、vtableを取得して、再帰的に処理することができました。
+また構造体などの型のサポートも広がり、フィールドのoffsetと`TypeId`からそのトレイトオブジェクトを取得できるようになりました。
+これにより Struct / Tuple / Array / Reference の reflection が書けるようになり、
+プリミティブだけだった前回から対応できる型の範囲は大幅に広がりました。
 
 ## 実装: vtable を fat pointer に組み立てる 
-→ v2 の肝。`const fn` で `trait_info_of_trait_type_id` から vtable を取り出し、 
-field offset と組み合わせて `&dyn Ser<S>` の fat pointer を手で組み立てる。 
-→ `SerFieldInfo` / `SerTypeInfo` / `get_reflect_vtable` のコード断片。 
-→ なぜこれが必要になったか（前回との対比）。 
+
+上記の関数を活用するために以下のように処理をします。
+まず `const fn` で `trait_info_of_trait_type_id` から vtable を取り出し、 
+field offset と組み合わせて `&dyn Ser<S>` の fat pointer を手で組み立てます。
+ここで fat pointer 取得とその構造化をコンパイル時に先に処理してしまうことによって、
+実行時に 型ごとの分岐がいらなくなるようにしています。
+
+ただここにはトレードオフがあって、これによって対応できるフィールドの数が固定化されてしまいます。`const heap`等が実装されるまでこの制限はとれません。
 
 ## 実装: 2 階層の特殊化（SpecializedSer / SpecializedSerInner） 
-→ ユーザー拡張点を残すためユーザー向け（`SpecializedSer`）と 
-crate 内向け（`SpecializedSerInner`）を分けた。 
-→ ディスパッチ順序: `SpecializedSer` → `SpecializedSerInner` →  reflection フォールバック。
-→ `try_as_dyn` での分岐の書き方。 
+
+型の構造の情報からでは、表現できないシリアライズの表現を、別のトレイトで実装することで特殊化をすることができてます。
+今までの型の特殊化 `#[feature(min_specialization)]` などと違って、この特殊化はトレイト間の継承関係はなく、単にそのトレイトが実装されているならそのトレイトで乗っ取るということをしています。トレイト同士の関係でunsoundになる既存の特殊化と違ってこちらの方が安定化が近いとみられているます。
+
+`serde`と違い、シリアライザは関数の型パラメーターではなく、トレイト自体の型パラメーターにしてあります。これによって、シリアライザと対象の型のペアで特殊化できます。
+例えば、時刻用の定義があるシリアライザ向けに汎用のシリアライズの仕組外の方法でシリアライザを実装させることができます。現状の`serde`だと`deserialize_with`を使って構造体のあるフィールドに対して処理の特殊化ができますが、型単位ではできません。
+また、すこし工夫した点として、特殊化に使うトレイトを内部用と外部用とで分けることで、
+stdの型でもそのシリアライザにあった特殊化ができる余地を用意しています。
 
 ## 実装: 複合型が動く様子 
-→ struct / tuple / 配列 / 参照 の serialize ロジック（最小コード断片）。 
-→ Option / Vec / String / HashMap など std 型の特殊化は代表例だけ紹介。 
+<!-- → struct / tuple / 配列 / 参照 の serialize ロジック（最小コード断片）。 
+→ Option / Vec / String / HashMap など std 型の特殊化は代表例だけ紹介。  -->
 
 ## ビルド時間を測ってみた 
 → ベンチ設計: 同一の 8 フィールド構造体 200 個、serde+derive 版 と PoC  reflection 版で比較。 
@@ -111,3 +125,40 @@ crate 内向け（`SpecializedSerInner`）を分けた。
 - 実装パート: 公式ドキュメントに書いていない「書いてみて分かった」判断を入れる（2階層特殊化、MAX_FIELDS、vtable 手組み） 
 - ベンチ: 非対称な結果に対するあなた自身の解釈を正直に書く（「期待と違った」で OK） 
 - まとめ: 「触ってみてほしい」で締める（Q3-3 で決めた着地点） 
+
+
+
+<!-- ● PR の内容を確認しました。 
+
+  PR 152381 が変えること
+  - intrinsics::type_id と Type::of（リフレクションAPI）から 'static 制約が外れた
+  - ただし stable な TypeId::of には 'static 境界が残ったまま
+  - 非 'static の TypeId を得たい場合は Type::of::<(T,)>().kind で取り出す回避策が想定されている
+
+  このリポジトリで外せるかどうか
+
+  結論：「リフレクション経路だけなら理屈上は外せるが、現在の設計全体としては難しい」 です。
+
+  理由を箇所別に：
+
+  1. TypeSer::<S>::of::<T>()（lib.rs:582）
+  現状 TypeId::of::<T>() を使っているので 'static が必須。PR 152381 のおかげで
+  Type::of::<T>()(type_info feature) に切り替えれば T: 'static は不要にできる。
+  2. get_reflect_vtable（lib.rs:472）
+  内部で TypeId::of::<dyn Ser<S>>() を呼んでいる。dyn Ser<S> 自体に暗黙の 'static があるので、ここは
+  S: 'static がそのまま要る。
+  3. ブランケット impl の T: 'static（lib.rs:587）
+  try_as_dyn::<_, dyn SpecializedSer<S>>(self) が値の TypeId を必要とするので、これも基本 'static
+  前提。type_id intrinsic 直叩きに置き換えれば回避は可能だけど、try_as_dyn 側の実装次第。
+  4. DynMetadata<dyn Ser<S>>
+  トレイトオブジェクトの暗黙 'static。dyn Ser<S> + 'a
+  化するとシグネチャ全体が高階寿命だらけになって割に合わない。
+
+  実用的な提案
+  - PR 本文も明記している通り、非 'static 型の TypeId を使うと
+  他のクレートが保持している不変条件（同一 TypeId ⇒ 同一型）を壊しうるので、try_as_dyn ベースの
+  specialization 経路に持ち込むのは soundness 的に危険。
+  - 効果が大きいのはたぶん &'a T のようなライフタイム付き参照を直接 serialize
+  出来るようになること、ぐらい。今は &'static T しか入らない。
+  - やるなら「リフレクション専用の Ser 派生 trait（SpecializedSer
+  不使用）」を別経路で用意して、そっちだけ 'static を外す、という分離が現実的だと思います。 -->
