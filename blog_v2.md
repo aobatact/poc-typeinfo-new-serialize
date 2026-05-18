@@ -48,9 +48,14 @@ derive マクロはもう不要？ Rust nightly の進展で複合型シリア�
 
 `TypeId::trait_info_of_trait_type_id` で TypeId → `dyn Ser<S>` の vtable が引けるようになりました！
 これによってそれぞれの内側の型の`TypeId`から、vtableを取得して、再帰的に処理することができました。
+
 また構造体などの型のサポートも広がり、フィールドのoffsetと`TypeId`からそのトレイトオブジェクトを取得できるようになりました。
 これにより Struct / Tuple / Array / Reference の reflection が書けるようになり、
 プリミティブだけだった前回から対応できる型の範囲は大幅に広がりました。
+
+try_as_dynが `T: Sized`で、slice等の UnSized な型 を type_info 経由で処理できないという課題もありましたが、これは自分がPRを書いて解決させました！
+github.com/rust-lang/rust/pull/156104
+
 
 ## 実装: vtable を fat pointer に組み立てる 
 
@@ -245,14 +250,9 @@ assert_eq!(json.as_str(), r#"{"x":1,"y":2}"#);
 
 ## 残っている課題 
 - enum の reflection 対応（type_info 側の API 整備待ち） 
-- slice等の UnSized な型 を type_info 経由で処理できない（try_as_dyn の `?Sized` 対応待ち） 
+    - https://github.com/rust-lang/rust/pull/156403 の対応待ち
 - `MAX_FIELDS = 20` の暫定上限（`const` context の配列長制約）
 - release 時のコンパイル時間が serde より重い 
-
-## 設計判断のメモ 
-- なぜ 2 階層の特殊化を入れたか（ユーザー拡張点を残すため） 
-- なぜ vtable を手で組み立てる方針にしたか（他に選択肢がなかった） 
-- MAX_FIELDS=20 の妥協理由
 
 ## まとめ 
 - 前回は不可能だった複合型が、実際にシリアライザできるようになった 
