@@ -247,47 +247,15 @@ debugは reflection のほうが速いのは、`serde` は proc macro 展開が�
 → ベンチのコードはリポジトリの `bench/` に公開。 
 
 ## 残っている課題 
-- enum の reflection 対応（type_info 側の API 整備待ち） 
-    - https://github.com/rust-lang/rust/pull/156403 の対応待ち
-- `MAX_FIELDS = 20` の暫定上限（`const` context の配列長制約）
-- release 時のコンパイル時間が serde より重い 
-- `'static`制約
-<!-- ● PR の内容を確認しました。 
+一番大きいのは **enum の reflection 対応** で、これは type_info 側の API がまだ整備されていないため、[rust-lang/rust#156403](https://github.com/rust-lang/rust/pull/156403) の進展を待つ必要があります。
 
-  PR 152381 が変えること
-  - intrinsics::type_id と Type::of（リフレクションAPI）から 'static 制約が外れた
-  - ただし stable な TypeId::of には 'static 境界が残ったまま
-  - 非 'static の TypeId を得たい場合は Type::of::<(T,)>().kind で取り出す回避策が想定されている
+実装面では **`MAX_FIELDS = 20` の暫定上限** が残っています。これは `const` 文脈で動的長の配列を扱えないことから来ている制約で、`const heap` のような機能が入るまでは外せません。
 
-  このリポジトリで外せるかどうか
+性能面では前述の通り **release 時のコンパイル時間が serde より重い** という問題があり、ブランケット impl の単相化や LLVM 最適化の影響と思われます。ここはまだ調査の余地があります。
 
-  結論：「リフレクション経路だけなら理屈上は外せるが、現在の設計全体としては難しい」 です。
+設計上の制約として **`'static` 制約** も付いて回ります。`TypeId::of` や `try_as_dyn`、`DynMetadata<dyn Ser<S>>` のいずれも暗黙の `'static` を要求するため、現状では `&'static T` しか扱えません。最近の PR で `Type::of` 側からは `'static` 境界が外れたものの、`try_as_dyn` ベースの特殊化経路に非 `'static` の `TypeId` を持ち込むと soundness を壊しうるため、reflection 経路だけ分離して外すといった工夫が必要になりそうです。
 
-  理由を箇所別に：
-
-  1. TypeSer::<S>::of::<T>()（lib.rs:582）
-  現状 TypeId::of::<T>() を使っているので 'static が必須。PR 152381 のおかげで
-  Type::of::<T>()(type_info feature) に切り替えれば T: 'static は不要にできる。
-  2. get_reflect_vtable（lib.rs:472）
-  内部で TypeId::of::<dyn Ser<S>>() を呼んでいる。dyn Ser<S> 自体に暗黙の 'static があるので、ここは
-  S: 'static がそのまま要る。
-  3. ブランケット impl の T: 'static（lib.rs:587）
-  try_as_dyn::<_, dyn SpecializedSer<S>>(self) が値の TypeId を必要とするので、これも基本 'static
-  前提。type_id intrinsic 直叩きに置き換えれば回避は可能だけど、try_as_dyn 側の実装次第。
-  4. DynMetadata<dyn Ser<S>>
-  トレイトオブジェクトの暗黙 'static。dyn Ser<S> + 'a
-  化するとシグネチャ全体が高階寿命だらけになって割に合わない。
-
-  実用的な提案
-  - PR 本文も明記している通り、非 'static 型の TypeId を使うと
-  他のクレートが保持している不変条件（同一 TypeId ⇒ 同一型）を壊しうるので、try_as_dyn ベースの
-  specialization 経路に持ち込むのは soundness 的に危険。
-  - 効果が大きいのはたぶん &'a T のようなライフタイム付き参照を直接 serialize
-  出来るようになること、ぐらい。今は &'static T しか入らない。
-  - やるなら「リフレクション専用の Ser 派生 trait（SpecializedSer
-  不使用）」を別経路で用意して、そっちだけ 'static を外す、という分離が現実的だと思います。 -->
-- 属性対応
-    (属性で名前を変えるなど)
+最後に、serde で言うところの **属性対応**（フィールド名のリネームなど）もまだありません。現状、`type_info`では属性の情報はとれないのでここも std側の対応を待つことになります。
 
 ## まとめ 
 前回は不可能だった複合型のシリアライズが、実際に動くところまで持っていけました！
