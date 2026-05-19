@@ -1,18 +1,3 @@
-<!-- 最終構成案 
-
-タイトル 
-
-derive マクロはもう不要？ Rust nightly の進展で複合型シリアライズの PoC が動いた 
-
-前提メモ（執筆時に反映してください） 
-
-- 対象読者: Rust 中級〜上級（serde / proc macro は前提、vtable・unsafe raw pointer 操作もある程度分かる人） 
-- 検証環境: rustc 1.96.0-nightly (362211dc2 2026-03-24) 
-- 独自性の軸: 両 feature (type_info + try_as_dyn) を組み合わせた PoC + 実ビルド時間計測を日英問わず公開した記事がまだ見当たらない 
-- 読者に残したい状態: 「自分も nightly で触ってみたくなった」 
-
-見出し骨子  -->
-
 # derive マクロはもう不要？ Rust nightly の進展で複合型シリアライズの PoC が動いた
 
 ## 要約
@@ -22,30 +7,27 @@ derive マクロはもう不要？ Rust nightly の進展で複合型シリア�
 その後 Rust 側の対応が進んだので、現時点でどこまでできるか試してみたところ、
 構造体のシリアライズまではできることを確認できました！
 
-<!-- → 以前書いた記事（リンク）で「複合型は現状無理」と結論づけた直後、 
-2026 年初頭にかけて `TypeId::trait_info_of_*` 系の PR が連続マージされ、 
-試してみたら struct があっさりシリアライズできた、その驚き。 
-→ PoC のコード改変量が意外と少なかった実感も添える。  -->
-
 ## この記事で分かること 
 
 - 前回から何が動くようになったか 
 - 構造体の `type_info` 経由でのメソッド呼び出し方法
     - `TypeId::trait_info_of_trait_type_id` の使い方
 - reflection 版シリアライザの実ビルド時間（serde+derive との比較） 
-<!-- - 対象読者 / 検証環境  -->
+
+## 対象読者・検証環境
+
+- 対象読者: Rust 中級〜上級（serde / proc macro は前提、vtable・unsafe raw pointer 操作もある程度分かる人）
+- 検証環境: rustc 1.97.0-nightly (9eb3be26b 2026-05-18)
 
 ## 前回のおさらい（短く） 
 前回の記事の時点では、型情報からフィールドの型はとれても、その型をどうシリアライズするかを取り出す手段がありませんでした。
 型ごとにどのトレイトが実装されているかは当時でも`try_as_dyn`で確認できましたが、これは型`T`が分かっている前提のAPIで、`TypeId`からトレイトオブジェクトを取得することはできなかったためです。
 そのため、配列の要素や構造体のフィールドのように`TypeId`としてしか得られない型を処理できませんでした。
 
-<!-- → 「TypeId から trait への変換ができない」が最大の壁だったこと、3〜4 行で。 -->
-
 ## std側で何が変わったか
 
 `TypeId::trait_info_of_trait_type_id` で `TypeId` から `dyn Ser<S>` の vtable が引けるようになりました！
-これにより、構造体フィールドや配列要素の `TypeId` から vtable を取り出し、再帰的に処理することができます。
+これにより、構造体フィールドや配列要素の `TypeId` から vtable を取り出し、再帰的に処理できます。
 
 また構造体などの型のサポートも広がり、フィールドの offset と `TypeId` からそのトレイトオブジェクトを取得できるようになりました。
 これにより Struct / Tuple / Array / Reference の reflection が書けるようになり、
@@ -123,7 +105,7 @@ match type_info.kind {
 ## 実装: 2 階層の特殊化（SpecializedSer / SpecializedSerInner） 
 
 型の構造情報だけでは表現しきれないシリアライズ処理は、別のトレイトを用意してそちらで実装することで特殊化できます。
-`#[feature(min_specialization)]` のような既存の特殊化と違って、この方式はトレイト間の継承関係を持たず、対象のトレイトが実装されていればそちらを優先するだけのシンプルな仕組みです。既存の特殊化はトレイト同士の関係から unsound になり得ますが、この方式の方が安定化に近いとみられています。
+`#[feature(min_specialization)]` のような既存の特殊化と違って、この方式はトレイト間の継承関係を持たず、対象のトレイトが実装されていればそちらを優先するだけのシンプルな仕組みです。既存の特殊化はトレイト同士の関係から unsound になり得るのに対し、この downcast ベースの方式は [compiler-team#904](https://github.com/rust-lang/compiler-team/issues/904) で libcore 内の specialization をこの方式へ置き換える MCP が accepted されており、specialization の代替候補として実際に動き始めています。
 
 `serde`と違い、シリアライザは関数の型パラメーターではなく、トレイト自体の型パラメーターにしてあります。これによって、シリアライザと対象の型のペアで特殊化できます。
 例えば、時刻型を独自に扱いたいシリアライザ向けに、汎用のシリアライズ経路の外でその型の挙動を差し替える、といったことが可能です。現状の `serde` だと `serialize_with` を使って構造体のあるフィールドに対して処理の特殊化ができますが、型単位ではできません。
@@ -236,25 +218,25 @@ assert_eq!(json.as_str(), r#"{"x":1,"y":2}"#);
 
 ### 結果（5 回中央値）: 
 
-| mode | serde+derive | type_info reflection | 比 | 
+| mode | serde+derive | type_info reflection | 比 (reflection / serde) | 
 |---------|-------------:|---------------:|-------:| 
-| debug | 0.567 s | 0.425 s | 0.75x | 
-| release | 5.295 s | 12.586 s | 2.38x | 
+| debug | 0.567 s | 0.425 s | 0.75x (reflection が速い) | 
+| release | 5.295 s | 12.586 s | 2.38x (serde が速い) | 
 
 ### 解釈
 debug で reflection のほうが速いのは、`serde` の proc macro 展開が重いためだと思われます。
 ただ、release で現状遅いのは、ブランケット impl の単相化と LLVM 最適化が膨らむのが原因かもしれません。
 
 ## 残っている課題 
-一番大きいのは **enum の reflection 対応** で、これは type_info 側の API がまだ整備されていないため、[rust-lang/rust#156403](https://github.com/rust-lang/rust/pull/156403) の進展を待つ必要があります。
+一番大きいのは enum の reflection 対応で、これは type_info 側の API がまだ整備されていないため、[rust-lang/rust#156403](https://github.com/rust-lang/rust/pull/156403) の進展を待つ必要があります。
 
-実装面では **`MAX_FIELDS = 20` の暫定上限** が残っています。これは `const` 文脈で動的長の配列を扱えないことから来ている制約で、`const heap` のような機能が入るまでは外せません。
+実装面では `MAX_FIELDS = 20` の暫定上限が残っています。これは `const` 文脈で動的長の配列を扱えないことから来ている制約で、`const heap` のような機能が入るまでは外せません。
 
-性能面では前述の通り **release 時のコンパイル時間が serde より重い** という問題があり、ブランケット impl の単相化や LLVM 最適化の影響と思われます。ここはまだ調査の余地があります。
+性能面では前述の通り release 時のコンパイル時間が serde より重いという問題があり、ブランケット impl の単相化や LLVM 最適化の影響と思われます。ここはまだ調査の余地があります。
 
-設計上の制約として **`'static` 制約** も付いて回ります。`TypeId::of` や `try_as_dyn`、`DynMetadata<dyn Ser<S>>` のいずれも暗黙の `'static` を要求するため、現状では `&'static T` しか扱えません。最近の PR で `Type::of` 側からは `'static` 境界が外れたものの、`try_as_dyn` ベースの特殊化経路に非 `'static` の `TypeId` を持ち込むと soundness を壊しうるため、reflection 経路だけ分離して外すといった工夫が必要になりそうです。
+設計上の制約として `'static` 制約も付いて回ります。`TypeId::of` や `try_as_dyn`、`DynMetadata<dyn Ser<S>>` のいずれも暗黙の `'static` を要求するため、現状では `&'static T` しか扱えません。最近の PR で `Type::of` 側からは `'static` 境界が外れたものの、`try_as_dyn` ベースの特殊化経路に非 `'static` の `TypeId` を持ち込むと soundness を壊しうるため、reflection 経路だけ分離して外すといった工夫が必要になりそうです。
 
-最後に、serde で言うところの **属性対応**（フィールド名のリネームなど）もまだありません。現状、`type_info` では属性の情報はとれないのでここも std 側の対応を待つことになります。
+最後に、serde で言うところの属性対応（フィールド名のリネームなど）もまだありません。現状、`type_info` では属性の情報はとれないのでここも std 側の対応を待つことになります。
 
 ## まとめ 
 前回は不可能だった複合型のシリアライズが、実際に動くところまで持っていけました！
@@ -264,9 +246,9 @@ dev ビルドは serde より速いものの、release は遅い状態で、enum
 
 ---
 **参考リンク** 
-- 前回の記事（v1） 
-- reflection-and-comptime プロジェクトゴール
-- `TypeId::trait_info_of` PR (#152003)
-- Reflection MVP PR (#146923) 
-- `try_as_dyn` PR (#150033)
-- PoC リポジトリ 
+- [前回の記事（v1）](https://zenn.dev/uniquevision/articles/dfc58260217ab6)
+- [reflection-and-comptime プロジェクトゴール](https://rust-lang.github.io/rust-project-goals/2025h2/reflection-and-comptime.html)
+- [`TypeId::trait_info_of` PR (#152003)](https://github.com/rust-lang/rust/pull/152003)
+- [Tracking Issue for type_info (#146922)](https://github.com/rust-lang/rust/issues/146922)
+- [Tracking Issue for try_as_dyn (#144361)](https://github.com/rust-lang/rust/issues/144361)
+- [PoC リポジトリ](https://github.com/aobatact/poc-typeinfo-new-serialize)
