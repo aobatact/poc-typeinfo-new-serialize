@@ -231,9 +231,10 @@ assert_eq!(json.as_str(), r#"{"x":1,"y":2}"#);
 ## ビルド時間を測ってみた 
 
 せっかくなのでビルド時間がどうなったかを確認してみました。
+ベンチの設計としては、同一の 8 フィールド構造体 200 個、serde+derive 版 と PoC の reflection 版で比較してみました。
+ベンチのコードはリポジトリの bench/ に置いてあります。
 
-→ ベンチ設計: 同一の 8 フィールド構造体 200 個、serde+derive 版 と PoC reflection 版で比較。 
-→ 結果（5 回中央値）: 
+### 結果（5 回中央値）: 
 
 | mode | serde+derive | type_info reflection | 比 | 
 |---------|-------------:|---------------:|-------:| 
@@ -243,8 +244,6 @@ assert_eq!(json.as_str(), r#"{"x":1,"y":2}"#);
 ### 解釈
 debug で reflection のほうが速いのは、`serde` の proc macro 展開が重いためだと思われます。
 ただ、release で現状遅いのは、ブランケット impl の単相化と LLVM 最適化が膨らむのが原因かもしれません。
-
-→ ベンチのコードはリポジトリの `bench/` に公開。 
 
 ## 残っている課題 
 一番大きいのは **enum の reflection 対応** で、これは type_info 側の API がまだ整備されていないため、[rust-lang/rust#156403](https://github.com/rust-lang/rust/pull/156403) の進展を待つ必要があります。
