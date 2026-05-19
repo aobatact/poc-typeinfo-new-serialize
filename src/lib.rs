@@ -33,7 +33,6 @@
 #![feature(try_as_dyn)]
 #![feature(type_info)]
 #![feature(ptr_metadata)]
-#![feature(min_specialization)]
 
 use core::str;
 use std::{
@@ -585,7 +584,7 @@ impl<S: Serializer + 'static> TypeSer<S> {
 }
 
 impl<T: 'static + ?Sized, S: Serializer + 'static> Ser<S> for T {
-    default fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         if let Some(specialized) = std::any::try_as_dyn::<_, dyn SpecializedSer<S>>(self) {
             specialized.specialized_serialize(serializer)
         } else if let Some(specialized) =
