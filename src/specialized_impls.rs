@@ -1,32 +1,27 @@
-//! Specialized [`Ser`] implementations for standard library types.
+//! Specialized [`SpecializedSerInner`] implementations for standard library types.
 //!
 //! These implementations handle types that require custom serialization logic
 //! (e.g. `Option<T>`, `String`, `Vec<T>`, smart pointers, collections), or
 //! unsized types whose default reflection-based serialization is not the
 //! desired output (e.g. `OsStr`, `Path`).
 //!
-//! The implementations are split into two categories:
-//!
-//! - **Direct `Ser` impls**: specializations of the blanket impl for unsized
-//!   types (`OsStr`, `Path`) whose reflection-based serialization would not
-//!   produce the desired string output.
-//! - **`SpecializedSerInner` impls**: for sized types (`Option<T>`, `&str`,
-//!   `String`, `Vec<T>`, `Box<T>`, collections, etc.) that override the blanket
-//!   impl via `try_as_dyn` dispatch.
+//! All specializations are dispatched through `try_as_dyn` in the blanket
+//! `Ser` impl, so they work for both sized and unsized types without requiring
+//! the `min_specialization` feature.
 
 use super::*;
 use std::{ffi::OsStr, ops::Deref, path::Path};
 
 /// Serializes an `OsStr` as a string (with lossy UTF-8 conversion).
-impl<S: Serializer + 'static> Ser<S> for OsStr {
-    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+impl<S: Serializer> SpecializedSerInner<S> for OsStr {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.to_string_lossy().as_ref())
     }
 }
 
 /// Serializes a `Path` as a string (with lossy UTF-8 conversion).
-impl<S: Serializer + 'static> Ser<S> for Path {
-    fn serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
+impl<S: Serializer> SpecializedSerInner<S> for Path {
+    fn specialized_serialize(&self, serializer: &mut S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_os_str().to_string_lossy().as_ref())
     }
 }
